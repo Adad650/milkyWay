@@ -54,6 +54,8 @@ while run:
 
     screen.fill((0, 0, 0))
 
+
+
     for y in range(mazeY):
         for x in range(mazeX):
             rect = pygame.Rect(x * cellSize, y * cellSize, cellSize, cellSize)
@@ -64,15 +66,19 @@ while run:
             else:
                 pygame.draw.rect(screen, pathColor, rect)
 
-    # print(f"Player location in maze X: {player.centerx // cellSize}, Player location in maze Y: {player.centery // cellSize}")
+   # Check if player is in wall
 
+    previousLocX = player.centerx
+    previousLocY = player.centery
+    
     for i in range(mazeY):
         for x in range(mazeX):
             if maze[player.centery // cellSize][player.centerx // cellSize] == 1:
-                print("Player in wall")
-            else:
-                print("Player not in wall")
-
+                # print("Player in wall")
+                player.x = previousLocX
+                player.y = previousLocY
+# Movement
+    # Player movement
     key = pygame.key.get_pressed()
     if key[pygame.K_LSHIFT] or key[pygame.K_RSHIFT]:
         x = 4
@@ -81,7 +87,7 @@ while run:
         x = 2
         y = -2
 
-    # x
+    # Diagonal
     if key[pygame.K_w] and key[pygame.K_d]:
         player.move_ip(x * 0.7, y * 0.7)
     elif key[pygame.K_d] and key[pygame.K_s]:
@@ -90,7 +96,7 @@ while run:
         player.move_ip(-x * 0.7, -y * 0.7)
     elif key[pygame.K_a] and key[pygame.K_w]:
         player.move_ip(-x * 0.7, y * 0.7)
-    # T
+    # Cardinal
     elif key[pygame.K_a]:
         player.move_ip(-x, 0)
     elif key[pygame.K_d]:
