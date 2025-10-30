@@ -12,7 +12,7 @@ black = (0, 0, 0)
 lBlue = (0, 150, 255)
 blue = (0, 100, 255)
 
-echCooldown = 800
+echCooldown = 2000
 lastEchoTime = 0
 cooldownMsg = ""
 coolDownMsgTimer = 0
