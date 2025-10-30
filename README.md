@@ -45,4 +45,4 @@ python3 main.py
 - Pulses have a cooldown so use them smartly.
 - Reach the green tile in the botton right to escape the maze. 
 
-Feel free to tweak the constants in `main.py` (Cooldown for echo, color, etc.) to play around.
+Feel free to tweak the constants in `main.py` (Cooldown for echo, color, etc.)to play around.
