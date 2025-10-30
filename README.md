@@ -46,3 +46,8 @@ python3 main.py
 - Reach the green tile in the botton right to escape the maze. 
 
 Feel free to tweak the constants in `main.py` (Cooldown for echo, color, etc.)to play around.
+
+## Future improvements/upgrades:
+- A story that goes with the game
+- Enemies
+- A png image for the player
