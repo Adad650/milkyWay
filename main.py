@@ -14,11 +14,14 @@ blue = (0, 100, 255)
 
 echCooldown = 800
 lastEchoTime = 0
+cooldownMsg = ""
+coolDownMsgTimer = 0
 
+smallText = ""
 
 small_font = pygame.font.Font(None, 50)
 
-run = bool
+run = False
 menu = True
 
 while menu:
@@ -127,7 +130,15 @@ while run:
         if event.type == pygame.QUIT:
             run = False
         if event.type == pygame.MOUSEBUTTONDOWN:
-            echoes.append([player.centerx, player.centery, 0, 255])
+            currentTime = pygame.time.get_ticks()
+            if currentTime - lastEchoTime >= echCooldown:
+                echoes.append([player.centerx, player.centery, 0, 255])
+                lastEchoTime = currentTime
+                cooldownMsg = ""
+            else:
+                cooldownMsg = "Echo On Cooldown"
+                coolDownMsgTimer = currentTime
+            
 
     key = pygame.key.get_pressed()
     speed = 4 if (key[pygame.K_LSHIFT] or key[pygame.K_RSHIFT]) else 2
@@ -190,6 +201,13 @@ while run:
     screen.blit(darkness, (0, 0))
 
     pygame.draw.rect(screen, (0, 30, 255), player)
+
+    currentTime = pygame.time.get_ticks()
+    if cooldownMsg != "" and currentTime - coolDownMsgTimer < 1000:
+        smallText = small_font.render(cooldownMsg, True, (255, 50, 50))
+        rect = smallText.get_rect(center=(400, 500))
+        screen.blit(smallText, rect)
+
 
     # Win condition
     if player.colliderect(exit_rect):
