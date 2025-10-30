@@ -24,6 +24,9 @@ def genMaze(width, height):
     carve(0, 0)
     maze[0][0] = 0
     maze[height - 1][width - 1] = 0
+    print("\n\n\n")
+    for i in range(len(maze)):
+        print(f"{maze[i]}")
     return maze
 
 cellSize = 20
@@ -61,6 +64,15 @@ while run:
             else:
                 pygame.draw.rect(screen, pathColor, rect)
 
+    # print(f"Player location in maze X: {player.centerx // cellSize}, Player location in maze Y: {player.centery // cellSize}")
+
+    for i in range(mazeY):
+        for x in range(mazeX):
+            if maze[player.centery // cellSize][player.centerx // cellSize] == 1:
+                print("Player in wall")
+            else:
+                print("Player not in wall")
+
     key = pygame.key.get_pressed()
     if key[pygame.K_LSHIFT] or key[pygame.K_RSHIFT]:
         x = 4
@@ -69,6 +81,7 @@ while run:
         x = 2
         y = -2
 
+    # x
     if key[pygame.K_w] and key[pygame.K_d]:
         player.move_ip(x * 0.7, y * 0.7)
     elif key[pygame.K_d] and key[pygame.K_s]:
@@ -77,6 +90,7 @@ while run:
         player.move_ip(-x * 0.7, -y * 0.7)
     elif key[pygame.K_a] and key[pygame.K_w]:
         player.move_ip(-x * 0.7, y * 0.7)
+    # T
     elif key[pygame.K_a]:
         player.move_ip(-x, 0)
     elif key[pygame.K_d]:
@@ -102,7 +116,7 @@ while run:
         screen.blit(s, (0, 0))
 
     pygame.display.flip()
-    clock.tick(60)
+    clock.tick(30)
 
 pygame.quit()
 sys.exit()
