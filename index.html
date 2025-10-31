@@ -399,54 +399,39 @@
         }
 
         function drawEchoes() {
-            // Always draw the player
+            // Draw complete darkness first
+            ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            // Create a clipping region for visible areas
+            ctx.save();
+            ctx.beginPath();
+            
+            // Add a small area around the player that's always visible
+            ctx.arc(player.x, player.y, 15, 0, Math.PI * 2);
+            
+            // Add echo circles as visible areas if they exist
+            for (const echo of echoes) {
+                ctx.moveTo(echo.x + echo.radius, echo.y);
+                ctx.arc(echo.x, echo.y, echo.radius, 0, Math.PI * 2);
+                
+                // Draw echo ring
+                ctx.strokeStyle = `rgba(0, 200, 255, ${echo.alpha * 0.7})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            
+            // Use the path to create a clipping region
+            ctx.clip();
+            
+            // Draw the maze in the visible areas
+            drawMaze();
+            
+            // Draw the player on top of the maze but within the visible area
             drawPlayer();
             
-            // If there are echoes, create visible areas
-            if (echoes.length > 0) {
-                // Draw darkness overlay with some transparency to see player
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-                
-                // Create a clipping region for visible areas
-                ctx.save();
-                ctx.beginPath();
-                
-                // Add a small area around the player that's always visible
-                ctx.arc(player.x, player.y, 40, 0, Math.PI * 2);
-                
-                // Add echo circles as visible areas
-                for (const echo of echoes) {
-                    ctx.moveTo(echo.x + echo.radius, echo.y);
-                    ctx.arc(echo.x, echo.y, echo.radius, 0, Math.PI * 2);
-                    
-                    // Draw echo ring
-                    ctx.strokeStyle = `rgba(0, 200, 255, ${echo.alpha * 0.7})`;
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                }
-                
-                // Use the path to create a clipping region
-                ctx.clip();
-                
-                // Draw the maze in the visible areas
-                drawMaze();
-                
-                // Restore the context
-                ctx.restore();
-            } else {
-                // If no echoes, just draw a semi-transparent black overlay
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-                
-                // Draw a small visible area around the player
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(player.x, player.y, 40, 0, Math.PI * 2);
-                ctx.clip();
-                drawMaze();
-                ctx.restore();
-            }
+            // Restore the context
+            ctx.restore();
         }
 
         // Cutscene 1: Conveyor Belt
@@ -664,6 +649,7 @@
         
         // Cutscene 2: Robot Awakens
         async function cutscene2() {
+            console.log('Starting cutscene2');
             const pos = { 
                 x: CANVAS_WIDTH / 2, 
                 y: CANVAS_HEIGHT / 2,
@@ -671,148 +657,91 @@
                 baseY: CANVAS_HEIGHT / 2,
                 time: 0
             };
+            
             const startTime = Date.now();
-            const duration = 6000; // 6 seconds (increased duration)
+            const duration = 6000; // 6 seconds
             
             // Fade in
             await fadeIn(600);
             
             // Main cutscene loop
-            while (Date.now() - startTime < duration) {
+            function renderFrame() {
+                if (state !== 'cutscene2') return; // Stop if state changed
+                
                 // Clear
-                ctx.fillStyle = 'black';
+                ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
                 
                 // Update time-based effects
                 pos.time += 0.05;
-                pos.x = pos.baseX + Math.sin(pos.time * 2) * 3; // Gentle horizontal movement
-                pos.y = pos.baseY + Math.sin(pos.time * 1.5) * 2; // Gentle vertical movement
-                
-                // Calculate pulsing light properties
-                const lightPulse = 0.5 + (Math.sin(pos.time * 2) + 1) * 0.25; // 0.5 to 1.0
-                const lightRadius = 100 + Math.sin(pos.time * 3) * 20;
+                pos.x = pos.baseX + Math.sin(pos.time * 2) * 3;
+                pos.y = pos.baseY + Math.sin(pos.time * 1.5) * 2;
                 
                 // Draw ambient light
-                const ambientGradient = ctx.createRadialGradient(
+                const lightRadius = 200;
+                const gradient = ctx.createRadialGradient(
                     pos.x, pos.y, 0,
-                    pos.x, pos.y, lightRadius * 1.5
+                    pos.x, pos.y, lightRadius
                 );
-                ambientGradient.addColorStop(0, 'rgba(0, 100, 200, 0.1)');
-                ambientGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                gradient.addColorStop(0, 'rgba(0, 100, 200, 0.3)');
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
                 
-                ctx.fillStyle = ambientGradient;
+                ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
                 
                 // Draw robot with animation
                 ctx.save();
                 ctx.translate(pos.x, pos.y);
                 
-                // Add subtle rotation based on movement
-                const rotation = Math.sin(pos.time * 1.7) * 0.1;
-                ctx.rotate(rotation);
-                
-                // Draw pulsing light effect
-                const pulseLightGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, lightRadius);
-                pulseLightGradient.addColorStop(0, `rgba(100, 200, 255, ${0.3 * lightPulse})`);
-                pulseLightGradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
-                
-                ctx.fillStyle = pulseLightGradient;
+                // Draw robot (simplified for now)
+                ctx.fillStyle = '#3498db';
                 ctx.beginPath();
-                ctx.arc(0, 0, lightRadius, 0, Math.PI * 2);
+                ctx.arc(0, 0, 30, 0, Math.PI * 2);
                 ctx.fill();
                 
-                // Draw robot shadow
-                ctx.save();
-                ctx.scale(1, 0.3);
-                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                // Eyes
+                ctx.fillStyle = '#fff';
                 ctx.beginPath();
-                ctx.ellipse(0, 60, 25, 10, 0, 0, Math.PI * 2);
+                ctx.arc(-10, -5, 5, 0, Math.PI * 2);
+                ctx.arc(10, -5, 5, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.restore();
                 
-                // Draw robot
-                if (playerImage.complete) {
-                    // Animate between frames based on time
-                    const frame = Math.floor((pos.time * 5) % 4);
-                    const frameSize = 64;
-                    const frameX = (frame % 2) * frameSize;
-                    const frameY = Math.floor(frame / 2) * frameSize;
-                    
-                    ctx.drawImage(
-                        playerImage,
-                        frameX, frameY, frameSize, frameSize,
-                        -25, -25, 50, 50
-                    );
-                } else {
-                    ctx.fillStyle = COLORS.PLAYER;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 20, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                
-                // Draw light reflection on floor
-                const floorGradient = ctx.createLinearGradient(0, 20, 0, 100);
-                floorGradient.addColorStop(0, 'rgba(100, 200, 255, 0.2)');
-                floorGradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
-                
-                ctx.fillStyle = floorGradient;
-                ctx.beginPath();
-                ctx.ellipse(0, 40, 30, 10, 0, 0, Math.PI * 2);
-                ctx.fill();
+                // Mouth (animated)
+                const mouthHeight = 3 + Math.sin(pos.time * 5) * 2;
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(-10, 15, 20, mouthHeight);
                 
                 ctx.restore();
                 
-                // Add outer glow effect
-                const glowRadius = 80 + Math.sin(Date.now() / 200) * 20;
-                const glowGradient = ctx.createRadialGradient(
-                    pos.x, pos.y, 0,
-                    pos.x, pos.y, glowRadius
-                );
-                glowGradient.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
-                glowGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-                
-                ctx.fillStyle = glowGradient;
-                ctx.beginPath();
-                ctx.arc(pos.x, pos.y, glowRadius, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Draw speech bubble with text
+                // Draw speech bubble
                 drawSpeechBubble(
                     "Where... am I?",
-                    CANVAS_WIDTH / 2 - 100, 50, 200, 60, 15
+                    CANVAS_WIDTH / 2 - 100, 50, 200, 60, 10
                 );
                 
-                // Draw status text at bottom
-                const statusText = "Echo System Initializing...";
-                const progress = Math.min(1, (Date.now() - startTime) / 2000);
-                const progressBarWidth = 300 * progress;
-                
-                // Background for status
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                roundRect(ctx, 
-                    CANVAS_WIDTH / 2 - 150, 
-                    CANVAS_HEIGHT - 100, 
-                    300, 40, 5, true, false);
-                
-                // Progress bar
-                ctx.fillStyle = 'rgba(0, 200, 255, 0.7)';
-                roundRect(ctx, 
-                    CANVAS_WIDTH / 2 - 145, 
-                    CANVAS_HEIGHT - 95, 
-                    progressBarWidth - 10, 30, 5, true, false);
-                
-                // Status text
-                ctx.fillStyle = 'white';
-                ctx.font = '16px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(statusText, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 80);
-                
-                await new Promise(r => requestAnimationFrame(r));
+                // Continue the animation if we're still in cutscene2 and time remains
+                if (Date.now() - startTime < duration) {
+                    requestAnimationFrame(renderFrame);
+                } else {
+                    // End of cutscene
+                    state = 'tutorial';
+                }
             }
             
-            // Fade out and move to tutorial
-            await fadeOut(600);
-            state = 'tutorial';
+            // Start the animation
+            requestAnimationFrame(renderFrame);
+            
+            // Wait for the cutscene to complete
+            await new Promise(resolve => {
+                const checkComplete = () => {
+                    if (state !== 'cutscene2') {
+                        resolve();
+                    } else {
+                        setTimeout(checkComplete, 100);
+                    }
+                };
+                checkComplete();
+            });
         }
         
         // Tutorial
