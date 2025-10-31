@@ -1,22 +1,46 @@
 # Echo Maze
 
+Echo Maze is a 2-dimensional maze escape game where you pilot a defective robot who was built without a camera but has an extra speaker and uses echolocation to map out its surroundings.
 
+## Play Online
 
-Echo Maze is a 2-dimensional maze escape game built in Python with Pygame. You pilot a defective robot who was built without a camera but has an extra speaker and uses echolocation to map out its surroundings.
+You can play the game directly in your browser by opening `index.html` or by running the Flask server.
 
-## Requirements
-- Python 3.10 or newer
-- `pygame`
+## Local Development
 
+### Web Version (Recommended)
 
-Install the dependency:
-Install the dependency:
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```bash
-python3 -m pip install PyGame
-```
+2. Run the Flask server:
+   ```bash
+   python app.py
+   ```
 
-## Clone repo in a folder
+3. Open your browser and go to:
+   ```
+   http://localhost:5000
+   ```
+
+### Original Pygame Version
+
+1. Install Pygame:
+   ```bash
+   python3 -m pip install PyGame
+   ```
+
+2. Run the game:
+   ```bash
+   python main.py
+   ```
+
+## Game Controls
+- **WASD** - Move the robot
+- **Click** - Emit an echo pulse to reveal walls
+- **Find the green exit** to advance to the next level
 
 ```bash
 git clone https://github.com/Adad650/milkyWay
