@@ -3,8 +3,8 @@ name: Build Echo Game
 on:
   push:
     tags:
-      - 'v*'    # Runs when you push a tag like v1.0
-  workflow_dispatch:   # Allows manual runs too
+      - 'v*'          # Run when you push a tag like v1.0
+  workflow_dispatch:  # Allow manual runs too
 
 jobs:
   build:
@@ -23,23 +23,39 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      # Different shell for Windows vs Unix
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          if (Test-Path "requirements.txt") { pip install -r requirements.txt }
+
+      - name: Install dependencies (Mac/Linux)
+        if: matrix.os != 'windows-latest'
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Build executable
+      # Build section (PowerShell for Windows, Bash for others)
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            pyinstaller --onefile --add-data "player.png;." main.py
-          else
-            pyinstaller --onefile --add-data "player.png:." main.py
-          fi
+          pyinstaller --noconfirm --clean --onefile --collect-all pygame --add-data "player.png;." main.py
 
+      - name: Build executable (Mac/Linux)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --collect-all pygame --add-data "player.png:." main.py
+
+      # Upload artifacts for each OS
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Echo-${{ matrix.os }}
           path: dist/
-
