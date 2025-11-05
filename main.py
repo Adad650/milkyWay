@@ -1,298 +1,582 @@
-import pygame, sys, random, math, time
+import pygame
+import random
+import math
+import time
+import sys
 
 pygame.init()
 clock = pygame.time.Clock()
 
-screen = pygame.display.set_mode((800, 600))
-pygame.display.set_caption("Echo.")
-font = pygame.font.Font(None, 74)
-small_font = pygame.font.Font(None, 40)
+cellSize = 40
+mazeWide = 31
+mazeTall = 21
+screenWide = cellSize * mazeWide
+screenTall = cellSize * mazeTall
 
-white = (255, 255, 255)
-black = (0, 0, 0)
-gray = (80, 80, 80)
-blue = (0, 100, 255)
-lBlue = (0, 150, 255)
+whiteColor = (255, 255, 255)
+blackColor = (0, 0, 0)
+spaceColor = (15, 15, 28)
+exitLockedColor = (255, 70, 70)
+exitOpenColor = (80, 255, 150)
+keyColor = (255, 220, 0)
+buttonColor = (70, 200, 255)
+buttonDoneColor = (0, 180, 180)
+buddyColor = (255, 140, 200)
+wallColors = [(90, 0, 180), (0, 140, 200), (200, 80, 30), (120, 160, 60)]
+floorColors = [(20, 20, 40), (18, 28, 52), (26, 16, 48)]
+currentWallColor = wallColors[0]
+currentFloorColor = floorColors[0]
 
-playerPNG = pygame.image.load("player.png").convert_alpha()
-playerPNG = pygame.transform.scale(playerPNG, (40, 40))
+screen = pygame.display.set_mode((screenWide, screenTall))
+pygame.display.set_caption("Echo Maze Remix")
 
-state = "cutscene1"
+bigFont = pygame.font.Font(None, 72)
+mediumFont = pygame.font.Font(None, 46)
+miniFont = pygame.font.Font(None, 32)
 
-# --- Cutscene helpers ---
-def fade_in(duration=1000):
-    fade = pygame.Surface((800, 600))
-    for alpha in range(255, -1, -15):
-        fade.set_alpha(alpha)
-        screen.fill(black)
-        pygame.draw.rect(screen, gray, (0, 440, 800, 40))
-        screen.blit(fade, (0, 0))
+playerPic = pygame.transform.scale(pygame.image.load("player.png").convert_alpha(), (40, 40))
+
+gameState = "cutscene1"
+mazeMap = []
+mazeWalls = []
+playerHitboxSize = 26
+playerBox = pygame.Rect(0, 0, playerHitboxSize, playerHitboxSize)
+exitBox = pygame.Rect((mazeWide - 1) * cellSize, (mazeTall - 1) * cellSize, cellSize, cellSize)
+puzzlesNow = []
+exitLocked = True
+unlockFlashTime = 0
+
+echoBalls = []
+echoDelay = 2000
+lastEchoTime = 0
+cooldownWords = ""
+cooldownTime = 0
+
+levelNumber = 1
+levelStartTick = 0
+levelLine = ""
+lineTimer = 0
+
+tutorialLevelActive = False
+tutorialLines = []
+
+gameStarted = False
+
+buddySayings = [
+    "Please don't bump walls.",
+    "This place echoes weird!",
+    "Let me ride on your head!",
+    "We should make a club."
+]
+
+levelNotes = [
+    "Maze tip: corners hide secrets.",
+    "Echo more, worry less.",
+    "Shift = sprint. use it!",
+    "Keys do not eat batteries.",
+    "Floor buttons love attention.",
+    "If it's shiny, touch it.",
+    "Left click blasts sound. do it a lot!"
+]
+
+victoryBlurbs = [
+    "Camera quest marches on!",
+    "The boss owes you snacks.",
+    "Echo hero status increasing.",
+    "More puzzles await..."
+]
+
+
+def fadeIn(ms=800):
+    w, h = screen.get_size()
+    cover = pygame.Surface((w, h))
+    for alpha in range(255, -1, -20):
+        cover.set_alpha(alpha)
+        screen.fill(blackColor)
+        screen.blit(cover, (0, 0))
         pygame.display.flip()
-        clock.tick(30)
-        pygame.time.delay(duration // 20)
+        pygame.time.delay(max(1, ms // 20))
 
-def fade_out(duration=1000):
-    fade = pygame.Surface((800, 600))
-    for alpha in range(0, 255, 15):
-        fade.set_alpha(alpha)
-        screen.blit(fade, (0, 0))
+
+def fadeOut(ms=800):
+    w, h = screen.get_size()
+    cover = pygame.Surface((w, h))
+    for alpha in range(0, 256, 20):
+        cover.set_alpha(alpha)
+        screen.blit(cover, (0, 0))
         pygame.display.flip()
-        clock.tick(30)
-        pygame.time.delay(duration // 20)
+        pygame.time.delay(max(1, ms // 20))
 
-# --- Cutscene 1: Conveyor Belt ---
-def cutscene1():
-    global state
-    robots = [pygame.Rect(800 + i * 120, 400, 40, 40) for i in range(6)]
-    belt_speed = 2
-    text1 = small_font.render("Worker 1: We ran out of cameras!", True, white)
-    text2 = small_font.render("Worker 2: Just give him an extra speaker!", True, white)
-    start_time = pygame.time.get_ticks()
-    fade_in(800)
-    while pygame.time.get_ticks() - start_time < 6000:
-        screen.fill((10, 10, 10))
-        pygame.draw.rect(screen, gray, (0, 440, 800, 40))
 
-        # Belt lights
-        for i in range(0, 800, 60):
-            pygame.draw.circle(screen, (30, 30, 30), (i + (pygame.time.get_ticks()//100) % 60, 460), 6)
-
-        # Robots move left
-        for r in robots:
-            r.x -= belt_speed
-            if r.right < 0:
-                r.x = 800
-            screen.blit(playerPNG, r)
-
-        # Dialogue
-        elapsed = pygame.time.get_ticks() - start_time
-        if elapsed < 3000:
-            screen.blit(text1, (160, 100))
+def sceneOne():
+    global gameState
+    beltY = screenTall - 200
+    robots = [pygame.Rect(screenWide + i * 115, beltY - 40, 40, 40) for i in range(6)]
+    fadeIn(700)
+    start = pygame.time.get_ticks()
+    beltSpeed = 2
+    textOne = miniFont.render("Worker 1: We ran out of cameras!", True, whiteColor)
+    textTwo = miniFont.render("Worker 2: Just give him extra speakers!", True, whiteColor)
+    while pygame.time.get_ticks() - start < 6000:
+        screen.fill(spaceColor)
+        pygame.draw.rect(screen, (40, 40, 40), (0, beltY, screenWide, 40))
+        lampShift = (pygame.time.get_ticks() // 120) % 60
+        for i in range(0, screenWide, 60):
+            pygame.draw.circle(screen, (80, 80, 80), (i + lampShift, beltY + 20), 6)
+        for robo in robots:
+            robo.x -= beltSpeed
+            if robo.right < 0:
+                robo.x = screenWide
+            screen.blit(playerPic, robo)
+        if pygame.time.get_ticks() - start < 3200:
+            screen.blit(textOne, ((screenWide - textOne.get_width()) // 2, screenTall // 3))
         else:
-            screen.blit(text2, (140, 150))
-
+            screen.blit(textTwo, ((screenWide - textTwo.get_width()) // 2, screenTall // 3 + 60))
         pygame.display.flip()
         clock.tick(60)
-    fade_out(600)
-    state = "cutscene2"
+    fadeOut(500)
+    gameState = "cutscene2"
 
-# --- Cutscene 2: Robot Awakens ---
-def cutscene2():
-    global state
-    start_time = pygame.time.get_ticks()
-    pos = [400, 300]
-    light_radius = 80
-    fade_in(600)
-    while pygame.time.get_ticks() - start_time < 4000:
-        screen.fill((0, 0, 0))
-        pos[0] += random.choice([-2, 2])
-        pos[1] += random.choice([-2, 2])
-        rect = playerPNG.get_rect(center=pos)
-        screen.blit(playerPNG, rect)
 
-        # Pulsing light to simulate “echolocation starting”
-        light_radius = 80 + int(20 * math.sin(pygame.time.get_ticks() / 200))
-        light = pygame.Surface((800, 600), pygame.SRCALPHA)
-        pygame.draw.circle(light, (255, 255, 255, 60), rect.center, light_radius)
-        screen.blit(light, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
-
-        text = small_font.render("Where... am I?", True, white)
-        screen.blit(text, (320, 100))
+def sceneTwo():
+    global gameState
+    fadeIn(500)
+    start = pygame.time.get_ticks()
+    spot = [float(screenWide // 2), float(screenTall // 2)]
+    calmText = mediumFont.render("Anybody out there?", True, whiteColor)
+    quietText = mediumFont.render("It's really quiet...", True, whiteColor)
+    while pygame.time.get_ticks() - start < 4000:
+        screen.fill((8, 8, 14))
+        wiggleA = math.sin(pygame.time.get_ticks() / 600) * 1.5
+        wiggleB = math.cos(pygame.time.get_ticks() / 900) * 1.4
+        spot[0] += wiggleA * 0.2
+        spot[1] += wiggleB * 0.2
+        botRect = playerPic.get_rect(center=(int(spot[0]), int(spot[1])))
+        screen.blit(playerPic, botRect)
+        glow = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        glowSize = 90 + int(6 * math.sin(pygame.time.get_ticks() / 400))
+        pygame.draw.circle(glow, (200, 200, 255, 90), botRect.center, glowSize)
+        screen.blit(glow, (0, 0))
+        screen.blit(calmText, ((screenWide - calmText.get_width()) // 2, screenTall // 3))
+        if pygame.time.get_ticks() % 1100 > 550:
+            screen.blit(quietText, ((screenWide - quietText.get_width()) // 2, screenTall // 3 + 50))
         pygame.display.flip()
         clock.tick(30)
-    fade_out(600)
-    state = "tutorial"
+    fadeOut(400)
+    gameState = "tutorial"
 
-# --- Tutorial message display ---
-def tutorial():
-    global state
-    start_time = pygame.time.get_ticks()
-    fade_in(400)
+
+def showTutorial():
+    global gameState
+    fadeIn(400)
+    start = pygame.time.get_ticks()
+    tipOne = mediumFont.render("Click to blast sound (it's your echo)!", True, whiteColor)
+    tipTwo = mediumFont.render("Use W A S D to move. Shift makes you zoomy.", True, whiteColor)
+    tipThree = mediumFont.render("The exit likes puzzles now. Finish what it wants.", True, whiteColor)
+    tipFour = mediumFont.render("Keys, floor buttons, tiny bots... all random.", True, whiteColor)
     while True:
-        screen.fill(black)
-        elapsed = pygame.time.get_ticks() - start_time
-        if elapsed < 4000:
-            screen.blit(small_font.render("Click to emit sound (your echo).", True, white), (140, 200))
-        elif elapsed < 8000:
-            screen.blit(small_font.render("Use W A S D to move.", True, white), (220, 250))
-        elif elapsed < 12000:
-            screen.blit(small_font.render("Find your way to the exit...", True, white), (180, 300))
+        screen.fill(blackColor)
+        t = pygame.time.get_ticks() - start
+        if t < 4000:
+            screen.blit(tipOne, ((screenWide - tipOne.get_width()) // 2, screenTall // 2 - 80))
+        elif t < 8000:
+            screen.blit(tipTwo, ((screenWide - tipTwo.get_width()) // 2, screenTall // 2 - 20))
+        elif t < 12000:
+            screen.blit(tipThree, ((screenWide - tipThree.get_width()) // 2, screenTall // 2 + 40))
+        elif t < 16000:
+            screen.blit(tipFour, ((screenWide - tipFour.get_width()) // 2, screenTall // 2 + 100))
         else:
-            fade_out(400)
-            state = "game"
             break
         pygame.display.flip()
         clock.tick(30)
+    fadeOut(400)
+    gameState = "game"
 
-# --- Maze Generation ---
-def genMaze(width, height):
+
+def makeMaze(w, h):
     random.seed(time.time())
-    maze = [[1 for _ in range(width)] for _ in range(height)]
-    directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]
-    def carve(x, y):
-        maze[y][x] = 0
-        random.shuffle(directions)
-        for dx, dy in directions:
-            nx, ny = (x + dx * 2), (y + dy * 2)
-            if 0 <= ny < height and 0 <= nx < width and maze[ny][nx] == 1:
-                maze[y + dy][x + dx] = 0
+    grid = [[1 for _ in range(w)] for _ in range(h)]
+    def carve(cx, cy):
+        grid[cy][cx] = 0
+        dirs = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+        random.shuffle(dirs)
+        for dx, dy in dirs:
+            nx = cx + dx * 2
+            ny = cy + dy * 2
+            if 0 <= nx < w and 0 <= ny < h and grid[ny][nx] == 1:
+                grid[cy + dy][cx + dx] = 0
                 carve(nx, ny)
     carve(0, 0)
-    maze[0][0] = 0
-    maze[height - 1][width - 1] = 0
-    return maze
+    grid[0][0] = 0
+    grid[h - 1][w - 1] = 0
+    return grid
 
-cellSize = 40
-mazeX, mazeY = 31, 21
-maze = genMaze(mazeX, mazeY)
-screenWidth, screenHeight = mazeX * cellSize, mazeY * cellSize
-screen = pygame.display.set_mode((screenWidth, screenHeight))
 
-wallColor = (0, 0, 80)
-exitColor = (0, 255, 0)
+def getOpenSpots(grid):
+    spots = []
+    for ty in range(mazeTall):
+        for tx in range(mazeWide):
+            if grid[ty][tx] == 0 and (tx, ty) not in [(0, 0), (mazeWide - 1, mazeTall - 1)]:
+                spots.append((tx, ty))
+    return spots
 
-player = playerPNG.get_rect(center=(10, 10))
-exit_rect = pygame.Rect((mazeX - 1) * cellSize, (mazeY - 1) * cellSize, cellSize, cellSize)
-walls = [pygame.Rect(x * cellSize, y * cellSize, cellSize, cellSize)
-         for y in range(mazeY) for x in range(mazeX) if maze[y][x] == 1]
-echoes = []
-level = 1
-echCooldown = 2000
-lastEchoTime = 0
-cooldownMsg = ""
-coolDownMsgTimer = 0
 
-# --- Movement ---
-def move_player(rect, dx, dy, walls):
+def takeSpot(spots):
+    if not spots:
+        return random.randint(0, mazeWide - 1), random.randint(0, mazeTall - 1)
+    idx = random.randrange(len(spots))
+    return spots.pop(idx)
+
+
+def buildPuzzle(kind, level, spots):
+    if kind == "keys":
+        total = min(3 + level // 2, 6)
+        boxes = []
+        for _ in range(total):
+            x, y = takeSpot(spots)
+            boxes.append(pygame.Rect(x * cellSize + 10, y * cellSize + 10, cellSize - 20, cellSize - 20))
+        return {"type": "keys", "rects": boxes, "need": total, "grabbed": 0, "flash": 0}
+    if kind == "buttons":
+        total = min(2 + level // 3, 5)
+        pads = []
+        for _ in range(total):
+            x, y = takeSpot(spots)
+            pads.append({"rect": pygame.Rect(x * cellSize + 8, y * cellSize + 8, cellSize - 16, cellSize - 16),
+                         "done": False,
+                         "flash": 0})
+        return {"type": "buttons", "pads": pads}
+    if kind == "buddy":
+        x, y = takeSpot(spots)
+        buddyRect = pygame.Rect(x * cellSize + 6, y * cellSize + 6, cellSize - 12, cellSize - 12)
+        return {"type": "buddy",
+                "rect": buddyRect,
+                "found": False,
+                "follow": [float(buddyRect.centerx), float(buddyRect.centery)],
+                "chat": 0,
+                "line": random.choice(buddySayings)}
+    return {"type": "none"}
+
+
+def makePuzzles(level, grid):
+    spots = getOpenSpots(grid)
+    random.shuffle(spots)
+    kinds = ["keys", "buttons", "buddy"]
+    random.shuffle(kinds)
+    count = 1
+    if level >= 2:
+        count = 2
+    if level >= 4:
+        count = 3
+    picked = kinds[:count]
+    puzzles = []
+    for k in picked:
+        puzzles.append(buildPuzzle(k, level, spots))
+    return puzzles
+
+
+def startLevel():
+    global mazeMap, mazeWalls, exitBox, playerBox, puzzlesNow, exitLocked, unlockFlashTime
+    global levelStartTick, levelLine, lineTimer, gameStarted, screen, cooldownWords, cooldownTime, lastEchoTime
+    global currentWallColor, currentFloorColor, tutorialLevelActive, tutorialLines
+    if screen.get_size() != (screenWide, screenTall):
+        screen = pygame.display.set_mode((screenWide, screenTall))
+    mazeMap.clear()
+    mazeMap.extend(makeMaze(mazeWide, mazeTall))
+    mazeWalls.clear()
+    for my in range(mazeTall):
+        for mx in range(mazeWide):
+            if mazeMap[my][mx] == 1:
+                mazeWalls.append(pygame.Rect(mx * cellSize, my * cellSize, cellSize, cellSize))
+    exitBox = pygame.Rect((mazeWide - 1) * cellSize, (mazeTall - 1) * cellSize, cellSize, cellSize)
+    playerBox.width = playerHitboxSize
+    playerBox.height = playerHitboxSize
+    playerBox.center = (cellSize // 2, cellSize // 2)
+    puzzlesNow.clear()
+    tutorialLevelActive = (levelNumber == 1)
+    if tutorialLevelActive:
+        exitLocked = False
+        tutorialLines = [
+            "Tutorial Level!",
+            "Move with W A S D or the arrow keys.",
+            "Hold shift to sprint when you need speed.",
+            "Left click to shout your echo pulse.",
+            "Walk into the green exit to keep going."
+        ]
+    else:
+        puzzlesNow.extend(makePuzzles(levelNumber, mazeMap))
+        exitLocked = True if puzzlesNow else False
+        tutorialLines = []
+    unlockFlashTime = 0
+    levelStartTick = pygame.time.get_ticks()
+    levelLine = "" if tutorialLevelActive else random.choice(levelNotes)
+    lineTimer = levelStartTick
+    gameStarted = True
+    cooldownWords = ""
+    cooldownTime = levelStartTick
+    lastEchoTime = levelStartTick - echoDelay
+    echoBalls.clear()
+    currentWallColor = random.choice(wallColors)
+    currentFloorColor = random.choice(floorColors)
+    if tutorialLevelActive:
+        print("level", levelNumber, "tutorial level active")
+    else:
+        print("level", levelNumber, "puzzles:", [p["type"] for p in puzzlesNow])
+
+
+def updatePuzzles():
+    doneEverything = True
+    now = pygame.time.get_ticks()
+    for stuff in puzzlesNow:
+        if stuff["type"] == "keys":
+            for box in stuff["rects"][:]:
+                if playerBox.colliderect(box):
+                    stuff["rects"].remove(box)
+                    stuff["grabbed"] += 1
+                    stuff["flash"] = now
+            if stuff["rects"]:
+                doneEverything = False
+        elif stuff["type"] == "buttons":
+            for pad in stuff["pads"]:
+                if playerBox.colliderect(pad["rect"]):
+                    if not pad["done"]:
+                        pad["done"] = True
+                        pad["flash"] = now
+            if any(not pad["done"] for pad in stuff["pads"]):
+                doneEverything = False
+        elif stuff["type"] == "buddy":
+            if not stuff["found"] and playerBox.colliderect(stuff["rect"]):
+                stuff["found"] = True
+                stuff["chat"] = now
+                stuff["follow"][0] = float(stuff["rect"].centerx)
+                stuff["follow"][1] = float(stuff["rect"].centery)
+            if stuff["found"]:
+                px, py = playerBox.center
+                stuff["follow"][0] += (px - stuff["follow"][0]) * 0.12
+                stuff["follow"][1] += (py - stuff["follow"][1]) * 0.12
+                stuff["rect"].center = (int(stuff["follow"][0]), int(stuff["follow"][1]))
+            else:
+                doneEverything = False
+    return doneEverything
+
+
+def drawPuzzles():
+    now = pygame.time.get_ticks()
+    for stuff in puzzlesNow:
+        if stuff["type"] == "keys":
+            for box in stuff["rects"]:
+                pygame.draw.rect(screen, keyColor, box)
+                pygame.draw.rect(screen, blackColor, box, 2)
+        elif stuff["type"] == "buttons":
+            for pad in stuff["pads"]:
+                col = buttonDoneColor if pad["done"] else buttonColor
+                pygame.draw.rect(screen, col, pad["rect"])
+                pygame.draw.rect(screen, blackColor, pad["rect"], 2)
+        elif stuff["type"] == "buddy":
+            col = buddyColor if stuff["found"] else (200, 100, 255)
+            pygame.draw.rect(screen, col, stuff["rect"])
+            pygame.draw.rect(screen, blackColor, stuff["rect"], 2)
+            if stuff["found"] and now - stuff["chat"] < 2600:
+                bubble = miniFont.render(stuff["line"], True, whiteColor)
+                bubbleRect = bubble.get_rect(center=(stuff["rect"].centerx, stuff["rect"].top - 20))
+                screen.blit(bubble, bubbleRect)
+
+
+def puzzleMessages():
+    if tutorialLevelActive:
+        return []
+    words = []
+    for stuff in puzzlesNow:
+        if stuff["type"] == "keys":
+            left = len(stuff["rects"])
+            words.append(f"Keys grabbed {stuff['grabbed']} / {stuff['need']} (need {left} more)")
+        elif stuff["type"] == "buttons":
+            lit = sum(1 for pad in stuff["pads"] if pad["done"])
+            words.append(f"Floor buttons lit {lit} / {len(stuff['pads'])}")
+        elif stuff["type"] == "buddy":
+            if stuff["found"]:
+                words.append("Tiny bot found! get to the exit together.")
+            else:
+                words.append("Find the tiny bot hiding in the maze.")
+    if not words:
+        words.append("Exit is open. just go!")
+    return words
+
+
+def pushPlayer(rect, dx, dy):
     rect.x += dx
-    for wall in walls:
+    for wall in mazeWalls:
         if rect.colliderect(wall):
-            if dx > 0: rect.right = wall.left
-            elif dx < 0: rect.left = wall.right
+            if dx > 0:
+                rect.right = wall.left
+            elif dx < 0:
+                rect.left = wall.right
     rect.y += dy
-    for wall in walls:
+    for wall in mazeWalls:
         if rect.colliderect(wall):
-            if dy > 0: rect.bottom = wall.top
-            elif dy < 0: rect.top = wall.bottom
+            if dy > 0:
+                rect.bottom = wall.top
+            elif dy < 0:
+                rect.top = wall.bottom
+    return rect
 
-# --- MAIN LOOP ---
-run = True
-while run:
-    if state == "cutscene1":
-        cutscene1()
-    elif state == "cutscene2":
-        cutscene2()
-    elif state == "tutorial":
-        tutorial()
-    elif state == "game":
-        # normal gameplay
+
+def drawMaze():
+    for my in range(mazeTall):
+        for mx in range(mazeWide):
+            tile = pygame.Rect(mx * cellSize, my * cellSize, cellSize, cellSize)
+            if my == mazeTall - 1 and mx == mazeWide - 1:
+                color = exitLockedColor if exitLocked else exitOpenColor
+                pygame.draw.rect(screen, color, tile)
+            elif mazeMap[my][mx] == 1:
+                pygame.draw.rect(screen, currentWallColor, tile)
+            else:
+                if (mx + my) % 2 == 0:
+                    pygame.draw.rect(screen, currentFloorColor, tile)
+
+
+def runEchoes():
+    dark = pygame.Surface((screenWide, screenTall), pygame.SRCALPHA)
+    dark.fill((0, 0, 0, 255))
+    for wave in echoBalls[:]:
+        wave[2] += 8
+        wave[3] -= 5
+        if wave[3] <= 0:
+            echoBalls.remove(wave)
+            continue
+        for my in range(mazeTall):
+            for mx in range(mazeWide):
+                cx = mx * cellSize + cellSize // 2
+                cy = my * cellSize + cellSize // 2
+                dist = math.hypot(cx - wave[0], cy - wave[1])
+                if dist < wave[2]:
+                    block = pygame.Rect(mx * cellSize, my * cellSize, cellSize, cellSize)
+                    if mazeMap[my][mx] == 1:
+                        dark.fill((0, 0, 0, 120), block)
+                    else:
+                        dark.fill((0, 0, 0, 0), block)
+    screen.blit(dark, (0, 0))
+
+
+def drawPlayer():
+    sprite_rect = playerPic.get_rect(center=playerBox.center)
+    screen.blit(playerPic, sprite_rect)
+
+
+runGame = True
+while runGame:
+    if gameState == "cutscene1":
+        sceneOne()
+    elif gameState == "cutscene2":
+        sceneTwo()
+    elif gameState == "tutorial":
+        showTutorial()
+    elif gameState == "game":
+        if not gameStarted:
+            startLevel()
+        dt = clock.get_time() / 16.67
+        if dt <= 0:
+            dt = 1
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                run = False
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                currentTime = pygame.time.get_ticks()
-                if currentTime - lastEchoTime >= echCooldown:
-                    echoes.append([player.centerx, player.centery, 0, 255])
-                    lastEchoTime = currentTime
-                    cooldownMsg = ""
+                runGame = False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                now = pygame.time.get_ticks()
+                if now - lastEchoTime >= echoDelay:
+                    echoBalls.append([playerBox.centerx, playerBox.centery, 0, 255])
+                    lastEchoTime = now
+                    cooldownWords = ""
                 else:
-                    cooldownMsg = "Echo On Cooldown"
-                    coolDownMsgTimer = currentTime
+                    cooldownWords = "Echo is cooling down!"
+                    cooldownTime = now
+        keys = pygame.key.get_pressed()
+        moveX = 0
+        moveY = 0
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            moveY -= 1
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            moveY += 1
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            moveX -= 1
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            moveX += 1
+        if moveX != 0 and moveY != 0:
+            moveX *= 0.7071
+            moveY *= 0.7071
+        speed = 3.2 * dt
+        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+            speed = 5.0 * dt
+        playerBox = pushPlayer(playerBox, int(moveX * speed), int(moveY * speed))
+        playerBox.clamp_ip(screen.get_rect())
 
-        key = pygame.key.get_pressed()
-        speed = 4 if (key[pygame.K_LSHIFT] or key[pygame.K_RSHIFT]) else 2
-        dx, dy = 0, 0
-        if key[pygame.K_w]: dy = -speed
-        if key[pygame.K_s]: dy = speed
-        if key[pygame.K_a]: dx = -speed
-        if key[pygame.K_d]: dx = speed
-        move_player(player, dx, dy, walls)
+        wasLocked = exitLocked
+        allDone = updatePuzzles()
+        exitLocked = not allDone
+        if wasLocked and not exitLocked:
+            unlockFlashTime = pygame.time.get_ticks()
+            levelLine = "EXIT IS OPEN!!!"
+            lineTimer = unlockFlashTime
 
-        # draw maze
-        screen.fill((0, 0, 0))
-        for y in range(mazeY):
-            for x in range(mazeX):
-                rect = pygame.Rect(x * cellSize, y * cellSize, cellSize, cellSize)
-                if y == mazeY - 1 and x == mazeX - 1:
-                    pygame.draw.rect(screen, exitColor, rect)
-                elif maze[y][x] == 1:
-                    pygame.draw.rect(screen, wallColor, rect)
-        screen.blit(playerPNG, player)
+        nowTime = pygame.time.get_ticks()
+        if not tutorialLevelActive and nowTime - lineTimer > 7000:
+            levelLine = random.choice(levelNotes)
+            lineTimer = nowTime
 
-        # darkness + echo
-        darkness = pygame.Surface((screenWidth, screenHeight), pygame.SRCALPHA)
-        darkness.fill((0, 0, 0, 255))
-        for echo in echoes[:]:
-            ex, ey, r, a = echo
-            r += 8
-            a -= 5
-            echo[2], echo[3] = r, a
-            if a <= 0:
-                echoes.remove(echo)
-                continue
-            for y in range(mazeY):
-                for x in range(mazeX):
-                    cx, cy = x * cellSize + cellSize // 2, y * cellSize + cellSize // 2
-                    dist = math.hypot(cx - ex, cy - ey)
-                    if dist < r:
-                        rect = pygame.Rect(x * cellSize, y * cellSize, cellSize, cellSize)
-                        if maze[y][x] == 1:
-                            pygame.draw.rect(darkness, (0, 0, 0, 100), rect)
-                        else:
-                            pygame.draw.rect(darkness, (0, 0, 0, 0), rect)
-        screen.blit(darkness, (0, 0))
-        screen.blit(playerPNG, player)
+        screen.fill(spaceColor)
+        drawMaze()
+        drawPlayer()
+        runEchoes()
+        drawPuzzles()
+        if tutorialLevelActive:
+            tip_box = pygame.Surface((screenWide, 160), pygame.SRCALPHA)
+            tip_box.fill((0, 0, 0, 150))
+            screen.blit(tip_box, (0, 50))
+            for idx, line in enumerate(tutorialLines):
+                tip_text = miniFont.render(line, True, whiteColor)
+                screen.blit(tip_text, (screenWide // 2 - tip_text.get_width() // 2, 70 + idx * 28))
+        drawPlayer()
 
-        # cooldown text
-        currentTime = pygame.time.get_ticks()
-        if cooldownMsg != "" and currentTime - coolDownMsgTimer < 1000:
-            smallText = small_font.render(cooldownMsg, True, (255, 50, 50))
-            rect = smallText.get_rect(center=(400, 500))
-            screen.blit(smallText, rect)
-            barWidth = 300
-            barHeight = 15
-            barX = (screenWidth - barWidth) // 2
-            barY = screenHeight - 40
-            
-            timeSinceEcho = currentTime - lastEchoTime
-            progress = min(timeSinceEcho / echCooldown, 1.0)
+        levelLabel = "Tutorial" if tutorialLevelActive else f"Level {levelNumber}"
+        hudLevel = miniFont.render(levelLabel, True, whiteColor)
+        screen.blit(hudLevel, (10, 10))
+        levelSeconds = (nowTime - levelStartTick) / 1000
+        hudTime = miniFont.render(f"Time {levelSeconds:.1f}s", True, whiteColor)
+        screen.blit(hudTime, (10, 34))
+        for idx, text in enumerate(puzzleMessages()):
+            msgSurf = miniFont.render(text, True, whiteColor)
+            screen.blit(msgSurf, (10, 70 + idx * 24))
+        if levelLine:
+            lineSurf = miniFont.render(levelLine, True, whiteColor)
+            screen.blit(lineSurf, (10, screenTall - 70))
+        if unlockFlashTime and nowTime - unlockFlashTime < 1800:
+            flashSurf = mediumFont.render("EXIT IS OPEN!!!", True, exitOpenColor)
+            screen.blit(flashSurf, flashSurf.get_rect(center=(screenWide // 2, 80)))
+        if cooldownWords and nowTime - cooldownTime < 1100:
+            cdSurf = miniFont.render(cooldownWords, True, (255, 90, 90))
+            cdRect = cdSurf.get_rect(center=(screenWide // 2, screenTall - 90))
+            screen.blit(cdSurf, cdRect)
+            barWidth = 260
+            progress = min((nowTime - lastEchoTime) / echoDelay, 1.0)
+            barRect = pygame.Rect(screenWide // 2 - barWidth // 2, screenTall - 70, barWidth, 16)
+            pygame.draw.rect(screen, (70, 70, 70), barRect)
+            pygame.draw.rect(screen, (0, 160, 255), (barRect.x, barRect.y, int(barWidth * progress), 16))
+            pygame.draw.rect(screen, whiteColor, barRect, 2)
 
-            pygame.draw.rect(screen, (50, 50, 50), (barX, barY, barWidth, barHeight))
-
-            pygame.draw.rect(screen, (0, 150, 255), (barX, barY, barWidth * progress, barHeight))
-
-            pygame.draw.rect(screen, white, (barX, barY, barWidth, barHeight), 2)
-
-            label = small_font.render("Echo Cooldown", True, white)
-            screen.blit(label, (barX + 70, barY - 25))
-
-
-
-        level_text = small_font.render(f"Level {level}", True, white)
-        screen.blit(level_text, (400, 10))
-
-        # exit reached
-        if player.colliderect(exit_rect):
-            screen.fill(black)
-            goal_text = small_font.render("Goal: Get him a camera!", True, white)
-            screen.blit(goal_text, (screenWidth // 2 - 200, screenHeight // 2 + 80))
-            message = font.render("Good Job!", True, (0, 255, 0))
-            sub_message = small_font.render(f"Level {level} Complete", True, white)
-            screen.blit(message, (screenWidth // 2 - 150, screenHeight // 2 - 50))
-            screen.blit(sub_message, (screenWidth // 2 - 130, screenHeight // 2 + 20))
+        if playerBox.colliderect(exitBox) and not exitLocked:
+            screen.fill(blackColor)
+            winText = bigFont.render("You escaped!", True, exitOpenColor)
+            lvlText = mediumFont.render(f"Level {levelNumber} complete!", True, whiteColor)
+            ideaText = miniFont.render(random.choice(victoryBlurbs), True, whiteColor)
+            screen.blit(winText, winText.get_rect(center=(screenWide // 2, screenTall // 2 - 40)))
+            screen.blit(lvlText, lvlText.get_rect(center=(screenWide // 2, screenTall // 2 + 10)))
+            screen.blit(ideaText, ideaText.get_rect(center=(screenWide // 2, screenTall // 2 + 50)))
             pygame.display.flip()
-            pygame.time.delay(1500)
-            level += 1
-            echCooldown = max(500, 2000 - level * 100)
-            maze = genMaze(mazeX, mazeY)
-            walls = [pygame.Rect(x * cellSize, y * cellSize, cellSize, cellSize)
-                     for y in range(mazeY) for x in range(mazeX) if maze[y][x] == 1]
-            exit_rect = pygame.Rect((mazeX - 1) * cellSize, (mazeY - 1) * cellSize, cellSize, cellSize)
-            echoes.clear()
-            player.x, player.y = 0, 0
+            pygame.time.delay(1600)
+            levelNumber += 1
+            echoDelay = max(600, 2000 - levelNumber * 120)
+            startLevel()
+            continue
 
         pygame.display.flip()
-        player.clamp_ip(screen.get_rect())
         clock.tick(60)
 
 pygame.quit()

@@ -124,6 +124,16 @@
         let playerImage = new Image();
         playerImage.src = 'https://hc-cdn.hel1.your-objectstorage.com/s/v3/596845749eb07a7f4f90d02f10aa664dd5102874_player.png';
         
+        const TUTORIAL_LINES = [
+            'Tutorial Level!',
+            'Move with W A S D or the Arrow Keys.',
+            'Hold Shift to sprint when you need speed.',
+            'Click or tap to blast your echo.',
+            'Reach the green exit to move on.'
+        ];
+        let tutorialLevelActive = false;
+        let tutorialLines = [];
+
         // Game state
         let state = 'cutscene1'; // Start with first cutscene
         let level = 1;
@@ -143,7 +153,8 @@
         const player = {
             x: CELL_SIZE / 2,
             y: CELL_SIZE / 2,
-            radius: 15,
+            hitRadius: 12,
+            drawRadius: 18,
             speed: 2
         };
 
@@ -183,6 +194,9 @@
         }
 
         function setupLevel() {
+            tutorialLevelActive = (level === 1);
+            tutorialLines = tutorialLevelActive ? [...TUTORIAL_LINES] : [];
+            
             // Generate new maze
             maze = generateMaze(MAZE_WIDTH, MAZE_HEIGHT);
             
@@ -214,7 +228,7 @@
             levelComplete = false;
             
             // Update level display
-            document.getElementById('level').textContent = level;
+            document.getElementById('level').textContent = tutorialLevelActive ? 'Tutorial' : level;
         }
 
         // Check collision between two rectangles
@@ -226,17 +240,63 @@
         }
 
         // Handle player movement
-        const keys = {};
+        const keys = new Set();
+        const keyMap = {
+            'arrowup': 'up',
+            'w': 'up',
+            'arrowdown': 'down',
+            's': 'down',
+            'arrowleft': 'left',
+            'a': 'left',
+            'arrowright': 'right',
+            'd': 'right',
+            'shift': 'sprint'
+        };
+
+        // Track active movement directions
+        const activeDirections = {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            sprint: false
+        };
+
+        // Handle keydown
         document.addEventListener('keydown', (e) => {
-            keys[e.key.toLowerCase()] = true;
-            // Prevent arrow keys from scrolling the page
-            if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) {
+            const key = e.key.toLowerCase();
+            keys.add(key);
+            
+            // Update active directions
+            const direction = keyMap[key];
+            if (direction) {
+                activeDirections[direction] = true;
+            }
+            
+            // Prevent default for movement and space keys
+            if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'w', 'a', 's', 'd', 'shift'].includes(key)) {
                 e.preventDefault();
             }
         });
         
+        // Handle keyup
         document.addEventListener('keyup', (e) => {
-            keys[e.key.toLowerCase()] = false;
+            const key = e.key.toLowerCase();
+            keys.delete(key);
+            
+            // Update active directions
+            const direction = keyMap[key];
+            if (direction) {
+                activeDirections[direction] = false;
+            }
+        });
+        
+        // Handle window blur (reset all keys when window loses focus)
+        window.addEventListener('blur', () => {
+            keys.clear();
+            Object.keys(activeDirections).forEach(key => {
+                activeDirections[key] = false;
+            });
         });
 
         function movePlayer() {
@@ -245,21 +305,41 @@
             const prevX = player.x;
             const prevY = player.y;
             
-            // Check for shift key for running
-            const speed = (keys.shift) ? 4 : 2;
+            // Calculate movement vector
+            let moveX = 0;
+            let moveY = 0;
             
-            // Handle movement with arrow keys or WASD
-            if (keys['arrowup'] || keys['w']) player.y -= speed;
-            if (keys['arrowdown'] || keys['s']) player.y += speed;
-            if (keys['arrowleft'] || keys['a']) player.x -= speed;
-            if (keys['arrowright'] || keys['d']) player.x += speed;
+            // Base speed (normal walking speed)
+            const baseSpeed = 2;
+            const sprintMultiplier = 2; // Double speed when sprinting
+            
+            // Calculate movement based on active directions
+            if (activeDirections.up) moveY -= 1;
+            if (activeDirections.down) moveY += 1;
+            if (activeDirections.left) moveX -= 1;
+            if (activeDirections.right) moveX += 1;
+            
+            // Normalize diagonal movement (so moving diagonally isn't faster)
+            if (moveX !== 0 && moveY !== 0) {
+                const invSqrt2 = 0.7071; // 1/sqrt(2)
+                moveX *= invSqrt2;
+                moveY *= invSqrt2;
+            }
+            
+            // Apply sprint if shift is held
+            const speedMultiplier = activeDirections.sprint ? sprintMultiplier : 1;
+            const speed = baseSpeed * speedMultiplier;
+            
+            // Update player position
+            player.x += moveX * speed;
+            player.y += moveY * speed;
             
             // Create player rectangle for collision detection
             const playerRect = {
-                x: player.x - player.radius,
-                y: player.y - player.radius,
-                width: player.radius * 2,
-                height: player.radius * 2
+                x: player.x - player.hitRadius,
+                y: player.y - player.hitRadius,
+                width: player.hitRadius * 2,
+                height: player.hitRadius * 2
             };
             
             // Wall collision
@@ -272,8 +352,8 @@
             }
             
             // Keep player in bounds
-            player.x = Math.max(player.radius, Math.min(player.x, CANVAS_WIDTH - player.radius));
-            player.y = Math.max(player.radius, Math.min(player.y, CANVAS_HEIGHT - player.radius));
+            player.x = Math.max(player.hitRadius, Math.min(player.x, CANVAS_WIDTH - player.hitRadius));
+            player.y = Math.max(player.hitRadius, Math.min(player.y, CANVAS_HEIGHT - player.hitRadius));
             
             // Check if reached exit
             const distToExit = Math.hypot(player.x - exit.x, player.y - exit.y);
@@ -386,16 +466,32 @@
                 ctx.save();
                 ctx.translate(player.x, player.y);
                 // Scale down the image (assuming original is larger than we want)
-                const scale = 0.5; // Adjust this value to make the sprite smaller/larger
-                ctx.drawImage(playerImage, -player.radius, -player.radius, player.radius * 2, player.radius * 2);
+                ctx.drawImage(playerImage, -player.drawRadius, -player.drawRadius, player.drawRadius * 2, player.drawRadius * 2);
                 ctx.restore();
             } else {
                 // Fallback circle if image isn't loaded
                 ctx.fillStyle = COLORS.PLAYER;
                 ctx.beginPath();
-                ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+                ctx.arc(player.x, player.y, player.drawRadius, 0, Math.PI * 2);
                 ctx.fill();
             }
+        }
+
+        function drawTutorialOverlay() {
+            if (!tutorialLevelActive || tutorialLines.length === 0) {
+                return;
+            }
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            const panelHeight = 160;
+            ctx.fillRect(0, 50, CANVAS_WIDTH, panelHeight);
+            ctx.fillStyle = COLORS.WHITE;
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            tutorialLines.forEach((line, index) => {
+                ctx.fillText(line, CANVAS_WIDTH / 2, 85 + index * 28);
+            });
+            ctx.restore();
         }
 
         function drawEchoes() {
@@ -408,7 +504,8 @@
             ctx.beginPath();
             
             // Add a small area around the player that's always visible
-            ctx.arc(player.x, player.y, 15, 0, Math.PI * 2);
+            const baseGlow = Math.max(player.drawRadius, player.hitRadius + 4);
+            ctx.arc(player.x, player.y, baseGlow, 0, Math.PI * 2);
             
             // Add echo circles as visible areas if they exist
             for (const echo of echoes) {
@@ -847,6 +944,7 @@
                 
                 // Draw everything
                 drawEchoes();
+                drawTutorialOverlay();
                 
                 // Draw UI elements on top
                 const messageEl = document.getElementById('message');
