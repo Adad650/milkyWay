@@ -117,7 +117,9 @@
             EXIT: '#00FF00',
             PLAYER: '#0066FF',
             ECHO: 'rgba(0, 200, 255, 0.7)',
-            DARKNESS: 'rgba(0, 0, 0, 0.9)'
+            DARKNESS: 'rgba(0, 0, 0, 0.9)',
+            DASH: '#78ffb4',
+            SHIELD: '#fff28c'
         };
 
         // Game assets
@@ -131,17 +133,81 @@
             'Click or tap to blast your echo.',
             'Reach the green exit to move on.'
         ];
+        const STORY_FRAGMENTS = [
+            'Dispatch Log 17A: Prototype Echo Bot 6 went missing in this wing.',
+            'Memo: The maze keeps shifting so nobody reaches the broadcast tower.',
+            'Journal: I left resonance shards around—collect them and remember.',
+            'Studio Note: The boss wanted cameras, but we promised to find survivors.',
+            'Final Reminder: Reach the broadcast core and tell the city the truth.'
+        ];
+        const STORY_DURATION = 6000;
+        const BOOST_DURATION = 6000;
+        const STATUS_MESSAGE_DURATION = 2800;
+        const SPEED_BOOST_MULTIPLIER = 1.35;
+        const MAX_SHIELD_CHARGES = 2;
         let tutorialLevelActive = false;
         let tutorialLines = [];
+        let storyIndex = 0;
+        let storyPopup = '';
+        let storyPopupTime = 0;
 
         // Game state
         let state = 'cutscene1'; // Start with first cutscene
         let level = 1;
         let lastEchoTime = 0;
-        let echoCooldown = 2000; // Start with 2 second cooldown
+        let baseEchoCooldown = 2000;
+        let echoCooldown = baseEchoCooldown; // Start with 2 second cooldown
+        let echoBoostTimer = 0;
+        let speedBoostTimer = 0;
         let cooldownMessage = '';
         let cooldownTimer = 0;
         let gameComplete = false;
+        let collectibles = [];
+        let resonatorsFound = 0;
+        let resonatorsTotal = 0;
+        let shieldCharges = 0;
+        let statusMessage = '';
+        let statusMessageTime = 0;
+
+        let audioCtx = null;
+
+        function ensureAudioContext() {
+            if (!audioCtx) {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                if (Ctx) {
+                    audioCtx = new Ctx();
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            return audioCtx;
+        }
+
+        function playTone(freq, duration = 0.2, volume = 0.2) {
+            const ctxAudio = ensureAudioContext();
+            if (!ctxAudio) return;
+            const oscillator = ctxAudio.createOscillator();
+            const gainNode = ctxAudio.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.value = freq;
+            gainNode.gain.value = volume;
+            oscillator.connect(gainNode);
+            gainNode.connect(ctxAudio.destination);
+
+            const now = ctxAudio.currentTime;
+            oscillator.start(now);
+            gainNode.gain.setValueAtTime(volume, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            oscillator.stop(now + duration);
+        }
+
+        const playEchoSound = () => playTone(660, 0.15, 0.35);
+        const playPickupSound = () => playTone(900, 0.12, 0.3);
+        const playLoreSound = () => playTone(520, 0.25, 0.25);
+        const playExitSound = () => playTone(420, 0.3, 0.35);
+        const playShieldSound = () => playTone(220, 0.2, 0.45);
+        const playDashSound = () => playTone(1040, 0.16, 0.35);
 
         // Canvas setup
         const canvas = document.getElementById('gameCanvas');
@@ -226,9 +292,106 @@
             // Clear echoes and reset level state
             echoes = [];
             levelComplete = false;
+            collectibles = spawnCollectibles();
+            resonatorsFound = 0;
+            resonatorsTotal = collectibles.filter(item => item.type === 'resonator').length;
+            storyPopup = '';
+            storyPopupTime = 0;
+            echoBoostTimer = 0;
+            speedBoostTimer = 0;
+            echoCooldown = baseEchoCooldown;
+            shieldCharges = 0;
+            statusMessage = '';
+            statusMessageTime = 0;
             
             // Update level display
             document.getElementById('level').textContent = tutorialLevelActive ? 'Tutorial' : level;
+        }
+
+        function shuffleArray(arr) {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+        }
+
+        function spawnCollectibles() {
+            const spots = [];
+            for (let y = 0; y < MAZE_HEIGHT; y++) {
+                for (let x = 0; x < MAZE_WIDTH; x++) {
+                    if (maze[y][x] === 0 && !(x === 0 && y === 0) && !(x === MAZE_WIDTH - 1 && y === MAZE_HEIGHT - 1)) {
+                        spots.push({ x, y });
+                    }
+                }
+            }
+            if (spots.length === 0) return [];
+            shuffleArray(spots);
+            const items = [];
+
+            const grabCell = () => spots.length ? spots.pop() : { x: Math.floor(Math.random() * MAZE_WIDTH), y: Math.floor(Math.random() * MAZE_HEIGHT) };
+            const centerFromCell = (cell) => ({
+                x: cell.x * CELL_SIZE + CELL_SIZE / 2,
+                y: cell.y * CELL_SIZE + CELL_SIZE / 2
+            });
+
+            if (storyIndex < STORY_FRAGMENTS.length) {
+                const cell = grabCell();
+                const center = centerFromCell(cell);
+                items.push({
+                    type: 'story',
+                    x: center.x,
+                    y: center.y,
+                    radius: 12,
+                    text: STORY_FRAGMENTS[storyIndex],
+                    pulseOffset: Math.random() * 400
+                });
+            }
+
+            const extra = Math.min(1 + Math.floor(level / 2), 4);
+            for (let i = 0; i < extra; i++) {
+                if (!spots.length) break;
+                const cell = grabCell();
+                if (!cell) break;
+                const center = centerFromCell(cell);
+                items.push({
+                    type: 'resonator',
+                    x: center.x,
+                    y: center.y,
+                    radius: 8,
+                    pulseOffset: Math.random() * 400
+                });
+            }
+            const dashCount = 1 + Math.floor(level / 3);
+            for (let i = 0; i < dashCount; i++) {
+                if (!spots.length) break;
+                const cell = grabCell();
+                if (!cell) break;
+                const center = centerFromCell(cell);
+                items.push({
+                    type: 'dash',
+                    x: center.x,
+                    y: center.y,
+                    radius: 10,
+                    pulseOffset: Math.random() * 500
+                });
+            }
+            if (level >= 2) {
+                const shieldCount = level < 5 ? 1 : 2;
+                for (let i = 0; i < shieldCount; i++) {
+                    if (!spots.length) break;
+                    const cell = grabCell();
+                    if (!cell) break;
+                    const center = centerFromCell(cell);
+                    items.push({
+                        type: 'shield',
+                        x: center.x,
+                        y: center.y,
+                        radius: 10,
+                        pulseOffset: Math.random() * 600
+                    });
+                }
+            }
+            return items;
         }
 
         // Check collision between two rectangles
@@ -301,6 +464,11 @@
 
         function movePlayer() {
             if (levelComplete) return;
+            updateBoostTimer();
+            const now = Date.now();
+            if (speedBoostTimer && now > speedBoostTimer) {
+                speedBoostTimer = 0;
+            }
             
             const prevX = player.x;
             const prevY = player.y;
@@ -327,7 +495,10 @@
             }
             
             // Apply sprint if shift is held
-            const speedMultiplier = activeDirections.sprint ? sprintMultiplier : 1;
+            let speedMultiplier = activeDirections.sprint ? sprintMultiplier : 1;
+            if (speedBoostTimer && speedBoostTimer > now) {
+                speedMultiplier *= SPEED_BOOST_MULTIPLIER;
+            }
             const speed = baseSpeed * speedMultiplier;
             
             // Update player position
@@ -341,6 +512,8 @@
                 width: player.hitRadius * 2,
                 height: player.hitRadius * 2
             };
+
+            handleCollectibles();
             
             // Wall collision
             for (const wall of walls) {
@@ -360,13 +533,62 @@
             if (distToExit < CELL_SIZE && !levelComplete) {
                 levelComplete = true;
                 level++;
-                echoCooldown = Math.max(500, 2000 - level * 100); // Decrease cooldown with level
+                baseEchoCooldown = Math.max(500, 2000 - level * 100);
+                echoCooldown = baseEchoCooldown;
+                echoBoostTimer = 0;
+                playExitSound();
                 
                 // Show level complete message
                 showMessage('Level Complete!', 1500, () => {
                     setupLevel();
                 });
             }
+        }
+
+        function updateBoostTimer() {
+            if (echoBoostTimer && Date.now() > echoBoostTimer) {
+                echoBoostTimer = 0;
+                echoCooldown = baseEchoCooldown;
+            }
+        }
+
+        function handleCollectibles() {
+            if (!collectibles.length) return;
+            const now = Date.now();
+            const remaining = [];
+            for (const item of collectibles) {
+                const dist = Math.hypot(player.x - item.x, player.y - item.y);
+                if (dist < item.radius + player.hitRadius) {
+                    if (item.type === 'resonator') {
+                        resonatorsFound = Math.min(resonatorsTotal, resonatorsFound + 1);
+                        echoBoostTimer = now + BOOST_DURATION;
+                        echoCooldown = Math.max(400, baseEchoCooldown * 0.45);
+                        showMessage('Echo boost active!', 900);
+                        playPickupSound();
+                    } else if (item.type === 'story') {
+                        storyPopup = item.text;
+                        storyPopupTime = now;
+                        if (storyIndex < STORY_FRAGMENTS.length) {
+                            storyIndex++;
+                        }
+                        playLoreSound();
+                    } else if (item.type === 'dash') {
+                        speedBoostTimer = now + BOOST_DURATION;
+                        statusMessage = 'Thrusters engaged! You are faster.';
+                        statusMessageTime = now;
+                        showMessage('Thrusters active!', 900);
+                        playDashSound();
+                    } else if (item.type === 'shield') {
+                        shieldCharges = Math.min(MAX_SHIELD_CHARGES, shieldCharges + 1);
+                        statusMessage = `Shield stored (${shieldCharges}/${MAX_SHIELD_CHARGES})`;
+                        statusMessageTime = now;
+                        playShieldSound();
+                    }
+                } else {
+                    remaining.push(item);
+                }
+            }
+            collectibles = remaining;
         }
 
         // Show a temporary message
@@ -380,6 +602,12 @@
                 messageEl.style.display = 'none';
                 if (callback) callback();
             }, duration);
+        }
+
+        function requestEcho(e) {
+            if (e) e.preventDefault();
+            if (state !== 'game') return;
+            handleEcho();
         }
 
         // Handle mouse/touch for echoes
@@ -396,6 +624,7 @@
                 });
                 
                 lastEchoTime = currentTime;
+                playEchoSound();
                 
                 // Show cooldown UI
                 const cooldownBar = document.getElementById('cooldown-bar');
@@ -423,11 +652,17 @@
         }
         
         // Set up event listeners for echo
-        canvas.addEventListener('click', handleEcho);
-        canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            handleEcho();
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                requestEcho(e);
+            }
         });
+        canvas.addEventListener('click', (e) => {
+            if (e.button === 0) {
+                requestEcho(e);
+            }
+        });
+        canvas.addEventListener('touchstart', requestEcho, { passive: false });
 
         // Update echoes
         function updateEchoes() {
@@ -461,6 +696,15 @@
         }
 
         function drawPlayer() {
+            if (shieldCharges) {
+                ctx.save();
+                ctx.strokeStyle = COLORS.SHIELD;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.drawRadius + 8, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
             // Draw player sprite
             if (playerImage.complete) {
                 ctx.save();
@@ -494,6 +738,147 @@
             ctx.restore();
         }
 
+        function drawCollectibles() {
+            if (!collectibles.length) return;
+            const now = Date.now();
+            for (const item of collectibles) {
+                const pulse = 2 + Math.sin((now + item.pulseOffset) / 200) * 3;
+                if (item.type === 'resonator') {
+                    ctx.fillStyle = 'rgba(90, 255, 255, 0.9)';
+                    ctx.beginPath();
+                    ctx.arc(item.x, item.y, item.radius + pulse, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                } else if (item.type === 'story') {
+                    ctx.fillStyle = 'rgba(255, 210, 120, 0.95)';
+                    ctx.beginPath();
+                    ctx.moveTo(item.x, item.y - (item.radius + pulse));
+                    ctx.lineTo(item.x + item.radius + pulse, item.y);
+                    ctx.lineTo(item.x, item.y + (item.radius + pulse));
+                    ctx.lineTo(item.x - item.radius - pulse, item.y);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                } else if (item.type === 'dash') {
+                    ctx.strokeStyle = COLORS.DASH;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(item.x, item.y, item.radius + pulse, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(item.x - 8, item.y);
+                    ctx.lineTo(item.x + 8, item.y);
+                    ctx.stroke();
+                } else if (item.type === 'shield') {
+                    ctx.fillStyle = COLORS.SHIELD;
+                    ctx.beginPath();
+                    for (let i = 0; i < 6; i++) {
+                        const angle = (Math.PI / 3) * i;
+                        const px = item.x + (item.radius + pulse) * Math.cos(angle);
+                        const py = item.y + (item.radius + pulse) * Math.sin(angle);
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function drawHud() {
+            ctx.save();
+            const now = Date.now();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            const levelLabel = tutorialLevelActive ? 'Tutorial' : `Level ${level}`;
+            ctx.fillText(levelLabel, 12, 26);
+            if (resonatorsTotal > 0) {
+                ctx.textAlign = 'right';
+                ctx.fillStyle = '#5dfbff';
+                ctx.fillText(`Echo shards ${resonatorsFound}/${resonatorsTotal}`, CANVAS_WIDTH - 12, 26);
+            }
+            if (echoBoostTimer) {
+                ctx.fillStyle = '#5dfbff';
+                const remain = Math.max(0, (echoBoostTimer - now) / 1000);
+                ctx.fillText(`Boost ${remain.toFixed(1)}s`, CANVAS_WIDTH - 12, 50);
+            }
+            if (shieldCharges) {
+                ctx.fillStyle = COLORS.SHIELD;
+                ctx.fillText(`Shields ${shieldCharges}/${MAX_SHIELD_CHARGES}`, CANVAS_WIDTH - 12, 74);
+            }
+            if (speedBoostTimer) {
+                ctx.fillStyle = COLORS.DASH;
+                const remain = Math.max(0, (speedBoostTimer - now) / 1000);
+                ctx.fillText(`Thrusters ${remain.toFixed(1)}s`, CANVAS_WIDTH - 12, 98);
+            }
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#FFFFFF';
+            const statusLines = [];
+            if (speedBoostTimer && speedBoostTimer > now) {
+                statusLines.push('Thrusters engaged.');
+            }
+            if (shieldCharges) {
+                statusLines.push('Shields block the next collision.');
+            }
+            statusLines.push(`Story logs ${Math.min(storyIndex, STORY_FRAGMENTS.length)}/${STORY_FRAGMENTS.length}`);
+            statusLines.forEach((line, idx) => {
+                ctx.fillText(line, 12, 70 + idx * 22);
+            });
+
+            const panelX = CANVAS_WIDTH - 340;
+            const panelY = CANVAS_HEIGHT - 180;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+            ctx.fillRect(panelX, panelY, 320, 120);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'left';
+            const logLines = [
+                `Story logs ${Math.min(storyIndex, STORY_FRAGMENTS.length)}/${STORY_FRAGMENTS.length}`,
+                `Exit: ${levelComplete ? 'open' : 'find it'}`,
+                `Shields: ${shieldCharges}/${MAX_SHIELD_CHARGES}`,
+                `Thrusters: ${speedBoostTimer && speedBoostTimer > now ? 'online' : 'offline'}`
+            ];
+            logLines.forEach((line, idx) => {
+                ctx.fillText(line, panelX + 12, panelY + 24 + idx * 24);
+            });
+            ctx.restore();
+        }
+
+        function drawStoryOverlay() {
+            if (!storyPopup || Date.now() - storyPopupTime > STORY_DURATION) return;
+            ctx.save();
+            const panelHeight = 90;
+            const panelY = CANVAS_HEIGHT - panelHeight - 40;
+            ctx.fillStyle = 'rgba(10, 10, 20, 0.8)';
+            ctx.fillRect(40, panelY, CANVAS_WIDTH - 80, panelHeight);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.strokeRect(40, panelY, CANVAS_WIDTH - 80, panelHeight);
+            ctx.fillStyle = '#FFD278';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            wrapText(ctx, storyPopup, 60, panelY + 30, CANVAS_WIDTH - 120, 24);
+            ctx.restore();
+        }
+
+        function drawStatusMessage() {
+            if (!statusMessage || Date.now() - statusMessageTime > STATUS_MESSAGE_DURATION) return;
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, CANVAS_HEIGHT - 140, CANVAS_WIDTH, 40);
+            ctx.fillStyle = COLORS.DASH;
+            ctx.font = '22px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(statusMessage, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 112);
+            ctx.restore();
+        }
+
         function drawEchoes() {
             // Draw complete darkness first
             ctx.fillStyle = 'rgba(0, 0, 0, 1)';
@@ -523,6 +908,7 @@
             
             // Draw the maze in the visible areas
             drawMaze();
+            drawCollectibles();
             
             // Draw the player on top of the maze but within the visible area
             drawPlayer();
@@ -945,6 +1331,9 @@
                 // Draw everything
                 drawEchoes();
                 drawTutorialOverlay();
+                drawHud();
+                drawStoryOverlay();
+                drawStatusMessage();
                 
                 // Draw UI elements on top
                 const messageEl = document.getElementById('message');

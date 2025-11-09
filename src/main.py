@@ -3,8 +3,16 @@ import random
 import math
 import time
 import sys
+import io
+import wave
+import textwrap
+from array import array
 
 pygame.init()
+try:
+    pygame.mixer.init()
+except pygame.error:
+    print("Warning: audio disabled; continuing without sounds.", file=sys.stderr)
 clock = pygame.time.Clock()
 
 cellSize = 40
@@ -22,6 +30,10 @@ keyColor = (255, 220, 0)
 buttonColor = (70, 200, 255)
 buttonDoneColor = (0, 180, 180)
 buddyColor = (255, 140, 200)
+resonatorColor = (90, 255, 255)
+storyColor = (255, 210, 120)
+dashColor = (120, 255, 180)
+shieldColor = (255, 250, 170)
 wallColors = [(90, 0, 180), (0, 140, 200), (200, 80, 30), (120, 160, 60)]
 floorColors = [(20, 20, 40), (18, 28, 52), (26, 16, 48)]
 currentWallColor = wallColors[0]
@@ -36,6 +48,42 @@ miniFont = pygame.font.Font(None, 32)
 
 playerPic = pygame.transform.scale(pygame.image.load("player.png").convert_alpha(), (40, 40))
 
+
+def synth_tone(freq, duration_ms, volume=0.4):
+    """Generate a sine tone Sound without needing external files."""
+    if not pygame.mixer.get_init():
+        return None
+    sample_rate = 22050
+    total_samples = int(sample_rate * duration_ms / 1000)
+    amplitude = int(32767 * max(0.0, min(volume, 1.0)))
+    data = array("h")
+    for i in range(total_samples):
+        value = int(amplitude * math.sin(2 * math.pi * freq * (i / sample_rate)))
+        data.append(value)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(data.tobytes())
+    buffer.seek(0)
+    try:
+        return pygame.mixer.Sound(file=buffer)
+    except pygame.error:
+        return None
+
+
+def play_sound(effect):
+    if effect:
+        effect.play()
+
+
+echoSound = synth_tone(660, 140, 0.35)
+pickupSound = synth_tone(900, 110, 0.4)
+exitSound = synth_tone(520, 200, 0.45)
+shieldSound = synth_tone(220, 200, 0.45)
+dashSound = synth_tone(1040, 160, 0.35)
+
 gameState = "cutscene1"
 mazeMap = []
 mazeWalls = []
@@ -48,9 +96,11 @@ unlockFlashTime = 0
 
 echoBalls = []
 echoDelay = 2000
+baseEchoDelay = echoDelay
 lastEchoTime = 0
 cooldownWords = ""
 cooldownTime = 0
+echoBoostEndTime = 0
 
 levelNumber = 1
 levelStartTick = 0
@@ -68,6 +118,29 @@ buddySayings = [
     "Let me ride on your head!",
     "We should make a club."
 ]
+
+storyFragments = [
+    "Dispatch Log 17A: Prototype Echo Bot 6 (you) went missing in this wing.",
+    "Memo: The maze keeps shifting so intruders never reach the broadcast tower.",
+    "Journal: I left memory shards around—collect them to remember why we're here.",
+    "Studio Note: The boss wants camera footage, but I'd rather free the tiny bots.",
+    "Final Reminder: Reach the broadcast core and tell the city what happened."
+]
+storyIndex = 0
+storyPopup = ""
+storyPopupTime = 0
+storyPopupDuration = 6000
+
+collectibles = []
+resonatorsFound = 0
+resonatorsThisLevel = 0
+speedBoostEndTime = 0
+speedBoostMultiplier = 1.35
+shieldCharges = 0
+maxShieldCharges = 2
+statusMessage = ""
+statusMessageTime = 0
+statusMessageDuration = 2800
 
 levelNotes = [
     "Maze tip: corners hide secrets.",
@@ -274,10 +347,59 @@ def makePuzzles(level, grid):
     return puzzles
 
 
+def makeCollectibles(level, grid):
+    spots = getOpenSpots(grid)
+    random.shuffle(spots)
+
+    def rect_from_spot():
+        x, y = takeSpot(spots)
+        return pygame.Rect(x * cellSize + 12, y * cellSize + 12, cellSize - 24, cellSize - 24)
+
+    items = []
+    if storyIndex < len(storyFragments):
+        items.append({
+            "type": "story",
+            "rect": rect_from_spot(),
+            "text": storyFragments[storyIndex],
+            "pulse": random.randint(0, 400)
+        })
+    resonator_count = min(2 + level // 2, 5)
+    for _ in range(resonator_count):
+        if not spots:
+            break
+        items.append({
+            "type": "resonator",
+            "rect": rect_from_spot(),
+            "pulse": random.randint(0, 400)
+        })
+    dash_count = 1 + level // 3
+    for _ in range(dash_count):
+        if not spots:
+            break
+        items.append({
+            "type": "dash",
+            "rect": rect_from_spot(),
+            "pulse": random.randint(0, 500)
+        })
+    if level >= 2:
+        shield_count = 1 if level < 5 else 2
+        for _ in range(shield_count):
+            if not spots:
+                break
+            items.append({
+                "type": "shield",
+                "rect": rect_from_spot(),
+                "pulse": random.randint(0, 600)
+            })
+    return items
+
+
 def startLevel():
     global mazeMap, mazeWalls, exitBox, playerBox, puzzlesNow, exitLocked, unlockFlashTime
     global levelStartTick, levelLine, lineTimer, gameStarted, screen, cooldownWords, cooldownTime, lastEchoTime
     global currentWallColor, currentFloorColor, tutorialLevelActive, tutorialLines
+    global collectibles, resonatorsFound, resonatorsThisLevel, baseEchoDelay, echoBoostEndTime, storyPopup, storyPopupTime
+    global speedBoostEndTime, shieldCharges
     if screen.get_size() != (screenWide, screenTall):
         screen = pygame.display.set_mode((screenWide, screenTall))
     mazeMap.clear()
@@ -306,6 +428,16 @@ def startLevel():
         puzzlesNow.extend(makePuzzles(levelNumber, mazeMap))
         exitLocked = True if puzzlesNow else False
         tutorialLines = []
+    collectibles.clear()
+    collectibles.extend(makeCollectibles(levelNumber, mazeMap))
+    resonatorsFound = 0
+    resonatorsThisLevel = sum(1 for item in collectibles if item["type"] == "resonator")
+    baseEchoDelay = echoDelay
+    echoBoostEndTime = 0
+    storyPopup = ""
+    storyPopupTime = 0
+    speedBoostEndTime = 0
+    shieldCharges = 0
     unlockFlashTime = 0
     levelStartTick = pygame.time.get_ticks()
     levelLine = "" if tutorialLevelActive else random.choice(levelNotes)
@@ -434,6 +566,80 @@ def drawMaze():
                     pygame.draw.rect(screen, currentFloorColor, tile)
 
 
+def updateCollectibles(nowTicks):
+    global collectibles, resonatorsFound, storyIndex, storyPopup, storyPopupTime
+    global echoDelay, echoBoostEndTime, cooldownWords, cooldownTime
+    global speedBoostEndTime, shieldCharges, levelLine, lineTimer
+    global statusMessage, statusMessageTime
+    changed = False
+    for item in collectibles[:]:
+        if playerBox.colliderect(item["rect"]):
+            collectibles.remove(item)
+            if item["type"] == "resonator":
+                play_sound(pickupSound)
+                resonatorsFound += 1
+                echoBoostEndTime = nowTicks + 6000
+                echoDelay = max(350, int(baseEchoDelay * 0.45))
+                cooldownWords = "Echo boost active!"
+                cooldownTime = nowTicks
+            elif item["type"] == "story":
+                play_sound(pickupSound)
+                storyPopup = item["text"]
+                storyPopupTime = nowTicks
+                storyIndex += 1
+            elif item["type"] == "dash":
+                speedBoostEndTime = nowTicks + 6000
+                statusMessage = "Thrusters engaged! you're faster."
+                statusMessageTime = nowTicks
+                levelLine = "Thrusters help you sprint faster!"
+                lineTimer = nowTicks
+                play_sound(dashSound)
+            elif item["type"] == "shield":
+                shieldCharges = min(maxShieldCharges, shieldCharges + 1)
+                statusMessage = f"Shield charge stored ({shieldCharges}/{maxShieldCharges})"
+                statusMessageTime = nowTicks
+                levelLine = "Shields block one wall smack."
+                lineTimer = nowTicks
+                play_sound(shieldSound)
+            changed = True
+    if echoBoostEndTime and nowTicks > echoBoostEndTime:
+        echoDelay = baseEchoDelay
+        echoBoostEndTime = 0
+    if speedBoostEndTime and nowTicks > speedBoostEndTime:
+        speedBoostEndTime = 0
+    return changed
+
+
+def drawCollectibles():
+    now = pygame.time.get_ticks()
+    for item in collectibles:
+        cx, cy = item["rect"].center
+        pulse = 3 + int(3 * math.sin((now + item["pulse"]) / 200))
+        if item["type"] == "resonator":
+            pygame.draw.circle(screen, resonatorColor, (cx, cy), 8 + pulse)
+            pygame.draw.circle(screen, whiteColor, (cx, cy), 4 + pulse // 2, 2)
+        elif item["type"] == "story":
+            points = [
+                (cx, item["rect"].top - pulse),
+                (item["rect"].right + pulse, cy),
+                (cx, item["rect"].bottom + pulse),
+                (item["rect"].left - pulse, cy)
+            ]
+            pygame.draw.polygon(screen, storyColor, points)
+            pygame.draw.polygon(screen, blackColor, points, 2)
+        elif item["type"] == "dash":
+            pygame.draw.circle(screen, dashColor, (cx, cy), 10 + pulse, 2)
+            pygame.draw.circle(screen, dashColor, (cx, cy), 4 + pulse // 2)
+            pygame.draw.line(screen, whiteColor, (cx - 6, cy), (cx + 6, cy), 3)
+        elif item["type"] == "shield":
+            hex_pts = []
+            for i in range(6):
+                angle = math.radians(60 * i)
+                hex_pts.append((cx + (10 + pulse) * math.cos(angle), cy + (10 + pulse) * math.sin(angle)))
+            pygame.draw.polygon(screen, shieldColor, hex_pts)
+            pygame.draw.polygon(screen, blackColor, hex_pts, 2)
+
+
 def runEchoes():
     dark = pygame.Surface((screenWide, screenTall), pygame.SRCALPHA)
     dark.fill((0, 0, 0, 255))
@@ -458,6 +664,8 @@ def runEchoes():
 
 
 def drawPlayer():
+    if shieldCharges:
+        pygame.draw.circle(screen, shieldColor, playerBox.center, 28, 2)
     sprite_rect = playerPic.get_rect(center=playerBox.center)
     screen.blit(playerPic, sprite_rect)
 
@@ -485,6 +693,7 @@ while runGame:
                     echoBalls.append([playerBox.centerx, playerBox.centery, 0, 255])
                     lastEchoTime = now
                     cooldownWords = ""
+                    play_sound(echoSound)
                 else:
                     cooldownWords = "Echo is cooling down!"
                     cooldownTime = now
@@ -505,6 +714,8 @@ while runGame:
         speed = 3.2 * dt
         if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
             speed = 5.0 * dt
+        if speedBoostEndTime and pygame.time.get_ticks() < speedBoostEndTime:
+            speed *= speedBoostMultiplier
         playerBox = pushPlayer(playerBox, int(moveX * speed), int(moveY * speed))
         playerBox.clamp_ip(screen.get_rect())
 
@@ -515,14 +726,17 @@ while runGame:
             unlockFlashTime = pygame.time.get_ticks()
             levelLine = "EXIT IS OPEN!!!"
             lineTimer = unlockFlashTime
+            play_sound(exitSound)
 
         nowTime = pygame.time.get_ticks()
+        updateCollectibles(nowTime)
         if not tutorialLevelActive and nowTime - lineTimer > 7000:
             levelLine = random.choice(levelNotes)
             lineTimer = nowTime
 
         screen.fill(spaceColor)
         drawMaze()
+        drawCollectibles()
         drawPlayer()
         runEchoes()
         drawPuzzles()
@@ -541,12 +755,55 @@ while runGame:
         levelSeconds = (nowTime - levelStartTick) / 1000
         hudTime = miniFont.render(f"Time {levelSeconds:.1f}s", True, whiteColor)
         screen.blit(hudTime, (10, 34))
-        for idx, text in enumerate(puzzleMessages()):
+        if resonatorsThisLevel:
+            shardText = miniFont.render(f"Echo shards {resonatorsFound}/{resonatorsThisLevel}", True, resonatorColor)
+            screen.blit(shardText, (screenWide - shardText.get_width() - 10, 10))
+        if echoBoostEndTime:
+            remain = max(0, (echoBoostEndTime - nowTime) / 1000)
+            boostSurf = miniFont.render(f"Boost {remain:.1f}s", True, resonatorColor)
+            screen.blit(boostSurf, (screenWide - boostSurf.get_width() - 10, 34))
+        if shieldCharges:
+            shieldSurf = miniFont.render(f"Shields {shieldCharges}/{maxShieldCharges}", True, shieldColor)
+            screen.blit(shieldSurf, (screenWide - shieldSurf.get_width() - 10, 58))
+        if speedBoostEndTime and speedBoostEndTime > nowTime:
+            rushRemain = max(0, (speedBoostEndTime - nowTime) / 1000)
+            rushSurf = miniFont.render(f"Thrusters {rushRemain:.1f}s", True, dashColor)
+            screen.blit(rushSurf, (screenWide - rushSurf.get_width() - 10, 82))
+        status_lines = puzzleMessages()
+        if speedBoostEndTime and speedBoostEndTime > nowTime:
+            status_lines.append("Thrusters make you sprint faster.")
+        if shieldCharges:
+            status_lines.append("Shields block the next collision.")
+        for idx, text in enumerate(status_lines):
             msgSurf = miniFont.render(text, True, whiteColor)
             screen.blit(msgSurf, (10, 70 + idx * 24))
         if levelLine:
             lineSurf = miniFont.render(levelLine, True, whiteColor)
             screen.blit(lineSurf, (10, screenTall - 70))
+        logPanel = pygame.Surface((320, 120), pygame.SRCALPHA)
+        logPanel.fill((0, 0, 0, 140))
+        screen.blit(logPanel, (screenWide - 340, screenTall - 180))
+        logLines = [
+            f"Story logs {min(storyIndex, len(storyFragments))}/{len(storyFragments)}",
+            f"Exit: {'open' if not exitLocked else 'locked'}",
+            f"Shields: {shieldCharges}/{maxShieldCharges}",
+            f"Thrusters: {'online' if speedBoostEndTime and speedBoostEndTime > nowTime else 'offline'}"
+        ]
+        for i, text in enumerate(logLines):
+            logSurf = miniFont.render(text, True, whiteColor)
+            screen.blit(logSurf, (screenWide - 330, screenTall - 165 + i * 24))
+        if storyPopup and nowTime - storyPopupTime < storyPopupDuration:
+            storySurf = pygame.Surface((screenWide, 90), pygame.SRCALPHA)
+            storySurf.fill((10, 10, 20, 200))
+            screen.blit(storySurf, (0, screenTall - 200))
+            wrapped = textwrap.wrap(storyPopup, 48)
+            for idx, text in enumerate(wrapped):
+                loreSurf = miniFont.render(text, True, storyColor)
+                screen.blit(loreSurf, loreSurf.get_rect(center=(screenWide // 2, screenTall - 170 + idx * 26)))
+        if statusMessage and nowTime - statusMessageTime < statusMessageDuration:
+            alertSurf = miniFont.render(statusMessage, True, dashColor)
+            alertRect = alertSurf.get_rect(center=(screenWide // 2, screenTall - 120))
+            screen.blit(alertSurf, alertRect)
         if unlockFlashTime and nowTime - unlockFlashTime < 1800:
             flashSurf = mediumFont.render("EXIT IS OPEN!!!", True, exitOpenColor)
             screen.blit(flashSurf, flashSurf.get_rect(center=(screenWide // 2, 80)))
@@ -566,6 +823,7 @@ while runGame:
             winText = bigFont.render("You escaped!", True, exitOpenColor)
             lvlText = mediumFont.render(f"Level {levelNumber} complete!", True, whiteColor)
             ideaText = miniFont.render(random.choice(victoryBlurbs), True, whiteColor)
+            play_sound(exitSound)
             screen.blit(winText, winText.get_rect(center=(screenWide // 2, screenTall // 2 - 40)))
             screen.blit(lvlText, lvlText.get_rect(center=(screenWide // 2, screenTall // 2 + 10)))
             screen.blit(ideaText, ideaText.get_rect(center=(screenWide // 2, screenTall // 2 + 50)))
