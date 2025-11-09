@@ -34,6 +34,7 @@ resonatorColor = (90, 255, 255)
 storyColor = (255, 210, 120)
 dashColor = (120, 255, 180)
 shieldColor = (255, 250, 170)
+hazardColor = (255, 90, 120)
 wallColors = [(90, 0, 180), (0, 140, 200), (200, 80, 30), (120, 160, 60)]
 floorColors = [(20, 20, 40), (18, 28, 52), (26, 16, 48)]
 currentWallColor = wallColors[0]
@@ -97,10 +98,14 @@ unlockFlashTime = 0
 echoBalls = []
 echoDelay = 2000
 baseEchoDelay = echoDelay
+comboWindow = 2500
 lastEchoTime = 0
 cooldownWords = ""
 cooldownTime = 0
 echoBoostEndTime = 0
+comboBoostEndTime = 0
+echoComboCount = 0
+lastComboTime = 0
 
 levelNumber = 1
 levelStartTick = 0
@@ -141,6 +146,8 @@ maxShieldCharges = 2
 statusMessage = ""
 statusMessageTime = 0
 statusMessageDuration = 2800
+staticFields = []
+hazardGraceTime = 0
 
 levelNotes = [
     "Maze tip: corners hide secrets.",
@@ -394,12 +401,91 @@ def makeCollectibles(level, grid):
     return items
 
 
+def makeStaticFields(level, grid):
+    hazardCount = min(3 + level, 8)
+    tiles = getOpenSpots(grid)
+    random.shuffle(tiles)
+    hazards = []
+    for _ in range(hazardCount):
+        if not tiles:
+            break
+        x, y = takeSpot(tiles)
+        hazards.append({
+            "rect": pygame.Rect(x * cellSize + 8, y * cellSize + 8, cellSize - 16, cellSize - 16),
+            "pulse": random.randint(0, 300)
+        })
+    return hazards
+
+
+def handleEchoCombo(nowTicks):
+    global echoComboCount, lastComboTime, comboBoostEndTime, statusMessage, statusMessageTime
+    global levelLine, lineTimer
+    if nowTicks - lastComboTime <= comboWindow:
+        echoComboCount += 1
+    else:
+        echoComboCount = 1
+    lastComboTime = nowTicks
+    if echoComboCount >= 3:
+        comboBoostEndTime = nowTicks + 5000
+        statusMessage = f"Echo combo x{echoComboCount}! cooldown slashed."
+        statusMessageTime = nowTicks
+        levelLine = "Chain echoes to keep the combo alive!"
+        lineTimer = nowTicks
+
+
+def refreshEchoDelay(nowTicks):
+    global echoDelay, echoBoostEndTime, comboBoostEndTime, echoComboCount
+    delay = baseEchoDelay
+    if echoComboCount and nowTicks - lastComboTime > comboWindow:
+        echoComboCount = 0
+    if echoBoostEndTime and nowTicks >= echoBoostEndTime:
+        echoBoostEndTime = 0
+    if comboBoostEndTime and nowTicks >= comboBoostEndTime:
+        comboBoostEndTime = 0
+    if echoBoostEndTime:
+        delay = min(delay, int(baseEchoDelay * 0.45))
+    if comboBoostEndTime:
+        delay = min(delay, int(baseEchoDelay * 0.35))
+    echoDelay = max(250, delay)
+
+
+def checkStaticFields(nowTicks):
+    global shieldCharges, statusMessage, statusMessageTime, playerBox, hazardGraceTime
+    if not staticFields or nowTicks < hazardGraceTime:
+        return
+    for field in staticFields:
+        if playerBox.colliderect(field["rect"]):
+            hazardGraceTime = nowTicks + 1200
+            if shieldCharges:
+                shieldCharges -= 1
+                statusMessage = "Shield absorbed static shock!"
+                statusMessageTime = nowTicks
+            else:
+                playerBox.center = (cellSize // 2, cellSize // 2)
+                statusMessage = "Static field zapped you to start!"
+                statusMessageTime = nowTicks
+            break
+
+
+def drawStaticFields():
+    if not staticFields:
+        return
+    now = pygame.time.get_ticks()
+    for field in staticFields:
+        rect = field["rect"]
+        pulse = 2 + int(2 * math.sin((now + field["pulse"]) / 180))
+        blow = pygame.Rect(rect.x - pulse, rect.y - pulse, rect.width + pulse * 2, rect.height + pulse * 2)
+        pygame.draw.rect(screen, (hazardColor[0], hazardColor[1], hazardColor[2],), blow, 2)
+        pygame.draw.rect(screen, hazardColor, rect)
+
+
 def startLevel():
     global mazeMap, mazeWalls, exitBox, playerBox, puzzlesNow, exitLocked, unlockFlashTime
     global levelStartTick, levelLine, lineTimer, gameStarted, screen, cooldownWords, cooldownTime, lastEchoTime
     global currentWallColor, currentFloorColor, tutorialLevelActive, tutorialLines
     global collectibles, resonatorsFound, resonatorsThisLevel, baseEchoDelay, echoBoostEndTime, storyPopup, storyPopupTime
-    global speedBoostEndTime, shieldCharges
+    global speedBoostEndTime, shieldCharges, staticFields
+    global echoComboCount, comboBoostEndTime, lastComboTime, hazardGraceTime
     if screen.get_size() != (screenWide, screenTall):
         screen = pygame.display.set_mode((screenWide, screenTall))
     mazeMap.clear()
@@ -434,10 +520,15 @@ def startLevel():
     resonatorsThisLevel = sum(1 for item in collectibles if item["type"] == "resonator")
     baseEchoDelay = echoDelay
     echoBoostEndTime = 0
+    comboBoostEndTime = 0
+    echoComboCount = 0
+    lastComboTime = 0
     storyPopup = ""
     storyPopupTime = 0
     speedBoostEndTime = 0
     shieldCharges = 0
+    staticFields = makeStaticFields(levelNumber, mazeMap) if not tutorialLevelActive else []
+    hazardGraceTime = 0
     unlockFlashTime = 0
     levelStartTick = pygame.time.get_ticks()
     levelLine = "" if tutorialLevelActive else random.choice(levelNotes)
@@ -694,6 +785,8 @@ while runGame:
                     lastEchoTime = now
                     cooldownWords = ""
                     play_sound(echoSound)
+                    handleEchoCombo(now)
+                    refreshEchoDelay(now)
                 else:
                     cooldownWords = "Echo is cooling down!"
                     cooldownTime = now
@@ -730,6 +823,8 @@ while runGame:
 
         nowTime = pygame.time.get_ticks()
         updateCollectibles(nowTime)
+        checkStaticFields(nowTime)
+        refreshEchoDelay(nowTime)
         if not tutorialLevelActive and nowTime - lineTimer > 7000:
             levelLine = random.choice(levelNotes)
             lineTimer = nowTime
@@ -737,6 +832,7 @@ while runGame:
         screen.fill(spaceColor)
         drawMaze()
         drawCollectibles()
+        drawStaticFields()
         drawPlayer()
         runEchoes()
         drawPuzzles()
@@ -769,11 +865,17 @@ while runGame:
             rushRemain = max(0, (speedBoostEndTime - nowTime) / 1000)
             rushSurf = miniFont.render(f"Thrusters {rushRemain:.1f}s", True, dashColor)
             screen.blit(rushSurf, (screenWide - rushSurf.get_width() - 10, 82))
+        comboActive = nowTime - lastComboTime <= comboWindow
+        if echoComboCount and comboActive:
+            comboSurf = miniFont.render(f"Echo combo x{echoComboCount}", True, (255, 255, 140))
+            screen.blit(comboSurf, (10, 50))
         status_lines = puzzleMessages()
         if speedBoostEndTime and speedBoostEndTime > nowTime:
             status_lines.append("Thrusters make you sprint faster.")
         if shieldCharges:
             status_lines.append("Shields block the next collision.")
+        if staticFields:
+            status_lines.append(f"Static fields active: {len(staticFields)}")
         for idx, text in enumerate(status_lines):
             msgSurf = miniFont.render(text, True, whiteColor)
             screen.blit(msgSurf, (10, 70 + idx * 24))
