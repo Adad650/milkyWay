@@ -178,6 +178,7 @@
             <button class="touch-btn" id="btn-down">▼</button>
             <button class="touch-btn blank"></button>
         </div>
+        <button class="touch-btn action" id="btn-shift">SHIFT</button>
         <button class="touch-btn action" id="btn-echo">ECHO</button>
     </div>
 
@@ -859,19 +860,20 @@
             ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(evt => btn.addEventListener(evt, release));
         }
 
-        function bindEchoButton(id) {
+        function bindActionButton(id, handler) {
             const btn = document.getElementById(id);
             if (!btn) return;
-            const trigger = (e) => {
+            const press = (e) => {
                 e.preventDefault();
-                requestEcho();
+                handler(true);
                 btn.classList.add('active');
             };
             const release = (e) => {
                 e.preventDefault();
+                handler(false);
                 btn.classList.remove('active');
             };
-            ['touchstart', 'mousedown'].forEach(evt => btn.addEventListener(evt, trigger));
+            ['touchstart', 'mousedown'].forEach(evt => btn.addEventListener(evt, press));
             ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(evt => btn.addEventListener(evt, release));
         }
 
@@ -892,7 +894,12 @@
             bindDirectionButton('btn-down', 'down');
             bindDirectionButton('btn-left', 'left');
             bindDirectionButton('btn-right', 'right');
-            bindEchoButton('btn-echo');
+            bindActionButton('btn-echo', (pressed) => {
+                if (pressed) requestEcho();
+            });
+            bindActionButton('btn-shift', (pressed) => {
+                activeDirections.sprint = pressed;
+            });
         }
 
         // Update echoes
